@@ -7,6 +7,7 @@ email: peppy0510@hotmail.com
 '''
 
 
+import collections
 import wx
 
 from controls import CardBase
@@ -48,6 +49,46 @@ def get_ceiling(value):
         if value <= unit * step:
             return unit * step
     return value
+
+
+def get_series_colour(theme, kind):
+    return theme['accent'] if kind == 'area' else mix(theme['accent'], theme['text'], 0.55)
+
+
+def draw_series(gc, theme, values, kind, rect, capacity, pen=1.5):
+    # values 0..1 or None for a gap, the newest at the right edge of rect
+    left, top, width, height = rect
+    step = width / float(max(1, capacity - 1))
+    start = left + width - step * (len(values) - 1)
+    runs, run = [], []
+    for index, value in enumerate(values):
+        if value is None:
+            if run:
+                runs.append(run)
+            run = []
+            continue
+        run.append((start + step * index, top + height * (1 - max(0.0, min(1.0, value)))))
+    if run:
+        runs.append(run)
+    colour = wx.Colour(get_series_colour(theme, kind))
+    for run in runs:
+        path = gc.CreatePath()
+        path.MoveToPoint(*run[0])
+        for point in run[1:]:
+            path.AddLineToPoint(*point)
+        if kind == 'area':
+            area = gc.CreatePath()
+            area.MoveToPoint(run[0][0], top + height)
+            for point in run:
+                area.AddLineToPoint(*point)
+            area.AddLineToPoint(run[-1][0], top + height)
+            area.CloseSubpath()
+            gc.SetPen(wx.TRANSPARENT_PEN)
+            gc.SetBrush(wx.Brush(wx.Colour(colour.Red(), colour.Green(), colour.Blue(), 70)))
+            gc.FillPath(area)
+        gc.SetPen(gc.CreatePen(wx.GraphicsPenInfo(colour).Width(pen)))
+        gc.SetBrush(wx.TRANSPARENT_BRUSH)
+        gc.StrokePath(path)
 
 
 class ReadoutCard(CardBase):
@@ -135,19 +176,39 @@ class RateCard(ReadoutCard):
     NAME_GAP = 5
     PAIR_GAP = 16
     WIDEST = '999.9 MB/s'
+    SPARK_WIDTH = 96
+    SPARK_HEIGHT = 26
+    SPARK_GAP = 14
+    LABEL_ROOM = 110
 
-    def __init__(self, parent, theme, label, description='', names=('R', 'W')):
+    def __init__(self, parent, theme, label, description='', names=('R', 'W'), capacity=300):
         super().__init__(parent, theme, label, description)
         self.names = names
         self.pair = None
+        self.capacity = capacity
+        self.history = (collections.deque(maxlen=capacity), collections.deque(maxlen=capacity))
 
     def set_rates(self, pair, description=None):
-        changed = self.set_text(description=description)
-        if pair != self.pair:
-            self.pair = pair
-            changed = True
-        if changed:
-            self.Refresh()
+        self.set_text(description=description)
+        self.pair = pair
+        for values, value in zip(self.history, pair or (None, None)):
+            values.append(value)
+        self.Refresh()
+
+    def draw_spark(self, gc, right, height):
+        # the read side fills, the write side is a line, both scaled to this row
+        left = right - self.SPARK_WIDTH
+        if left - self.PADDING < self.LABEL_ROOM:
+            return right
+        top = (height - self.SPARK_HEIGHT) / 2
+        fill_rect(gc, self.theme['rim'], left, top + self.SPARK_HEIGHT, self.SPARK_WIDTH, 1)
+        peaks = [value for values in self.history for value in values if value]
+        ceiling = get_ceiling(max(peaks)) if peaks else 1.0
+        for values, kind in zip(self.history, ('area', 'line')):
+            draw_series(gc, self.theme, [None if value is None else value / ceiling
+                                         for value in values], kind,
+                        (left, top, self.SPARK_WIDTH, self.SPARK_HEIGHT), self.capacity, 1.2)
+        return left
 
     def draw_control(self, gc, width, height):
         theme = self.theme
@@ -168,7 +229,7 @@ class RateCard(ReadoutCard):
             gc.DrawText(name, x, (height - gc.GetTextExtent(name)[1]) / 2)
             if index:
                 x -= self.PAIR_GAP
-        return x
+        return self.draw_spark(gc, x - self.SPARK_GAP, height)
 
 
 class CoreCard(ReadoutCard):
@@ -229,10 +290,6 @@ class GraphCard(ReadoutCard):
         self.scale = scale
         self.Refresh()
 
-    def get_colour(self, kind):
-        theme = self.theme
-        return theme['accent'] if kind == 'area' else mix(theme['accent'], theme['text'], 0.55)
-
     def draw(self, gc, width, height):
         theme = self.theme
         draw_row_face(gc, theme, width, height, self.first, self.last)
@@ -251,9 +308,9 @@ class GraphCard(ReadoutCard):
             gc.DrawText(name, x, 10)
             x -= 5 + LEGEND_SWATCH
             if kind == 'area':
-                fill_rect(gc, self.get_colour(kind), x, 13, LEGEND_SWATCH, 7, 1)
+                fill_rect(gc, get_series_colour(theme, kind), x, 13, LEGEND_SWATCH, 7, 1)
             else:
-                fill_rect(gc, self.get_colour(kind), x, 16, LEGEND_SWATCH, 2)
+                fill_rect(gc, get_series_colour(theme, kind), x, 16, LEGEND_SWATCH, 2)
             x -= LEGEND_GAP
 
         left, top = self.PADDING, GRAPH_TOP
@@ -263,39 +320,6 @@ class GraphCard(ReadoutCard):
         if self.scale:
             gc.SetFont(get_font(7.5), wx.Colour(theme['dim']))
             gc.DrawText(self.scale, left + 2, top + 2)
-        step = plot_width / float(max(1, self.capacity - 1))
         for _, values, kind in self.series:
-            self.draw_values(gc, values, kind, left, top, plot_width, plot_height, step)
-
-    def draw_values(self, gc, values, kind, left, top, plot_width, plot_height, step):
-        start = left + plot_width - step * (len(values) - 1)
-        runs, run = [], []
-        for index, value in enumerate(values):
-            if value is None:
-                if run:
-                    runs.append(run)
-                run = []
-                continue
-            run.append((start + step * index,
-                        top + plot_height * (1 - max(0.0, min(1.0, value)))))
-        if run:
-            runs.append(run)
-        colour = wx.Colour(self.get_colour(kind))
-        for run in runs:
-            path = gc.CreatePath()
-            path.MoveToPoint(*run[0])
-            for point in run[1:]:
-                path.AddLineToPoint(*point)
-            if kind == 'area':
-                area = gc.CreatePath()
-                area.MoveToPoint(run[0][0], top + plot_height)
-                for point in run:
-                    area.AddLineToPoint(*point)
-                area.AddLineToPoint(run[-1][0], top + plot_height)
-                area.CloseSubpath()
-                gc.SetPen(wx.TRANSPARENT_PEN)
-                gc.SetBrush(wx.Brush(wx.Colour(colour.Red(), colour.Green(), colour.Blue(), 70)))
-                gc.FillPath(area)
-            gc.SetPen(gc.CreatePen(wx.GraphicsPenInfo(colour).Width(1.5)))
-            gc.SetBrush(wx.TRANSPARENT_BRUSH)
-            gc.StrokePath(path)
+            draw_series(gc, theme, values, kind, (left, top, plot_width, plot_height),
+                        self.capacity)

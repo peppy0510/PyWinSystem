@@ -27,6 +27,8 @@ from utilities import call_painted
 
 
 HISTORY = 300
+# a row graph is only about 100 px wide, so it shows the last minute
+ROW_HISTORY = 60
 
 
 def get_ratio(used, total):
@@ -77,7 +79,7 @@ class ResourceBox(ScrollArea):
             return cards[key]
 
         def rate(key, label, description='', names=('R', 'W')):
-            cards[key] = RateCard(board, theme, label, description, names)
+            cards[key] = RateCard(board, theme, label, description, names, ROW_HISTORY)
             return cards[key]
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
