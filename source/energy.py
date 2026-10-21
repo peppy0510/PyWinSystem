@@ -111,7 +111,7 @@ def format_money(value, currency):
 
 
 class EnergyLog:
-    # kWh per day, counted only while the app runs
+    # counted only while the app runs
 
     def __init__(self):
         self.days = {}

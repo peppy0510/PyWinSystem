@@ -115,7 +115,6 @@ def read_nvme(number):
 
 
 def read_nvme_power(number):
-    # the controller's power state table: (watts, operational) for each state
     handle = open_disk(number)
     if handle is None:
         return None

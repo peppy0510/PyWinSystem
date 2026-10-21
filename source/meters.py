@@ -18,7 +18,6 @@ from utilities import get_font
 from utilities import get_text_width
 from utilities import mix
 
-# every readout row shares one grid: a picture slot, then a value column at the right edge
 SLOT_WIDTH = 200
 SLOT_GAP = 14
 VALUE_COLUMN = 104
@@ -241,7 +240,6 @@ class RateCard(ReadoutCard):
         left, slot_right, value_left, right = self.get_grid(width)
         peaks = [value for values in self.history for value in values if value]
         scale = get_rate_scale(max(peaks) if peaks else 0)
-        # the two rates stack in the value column; the names keep a fixed left edge
         values = ('—', '—') if self.pair is None else tuple(format_rate(value, scale)
                                                             for value in self.pair)
         for index, middle in enumerate((height / 2 - self.LINE_GAP,
@@ -324,7 +322,6 @@ class GraphCard(ReadoutCard):
         left, slot_right, value_left, right = self.get_grid(width)
         self.draw_label(gc, height, left - self.PADDING - self.LABEL_GAP)
 
-        # the legend doubles as the readout, in the value column like every other row
         middle = height / 2 - (len(self.series) - 1) * LEGEND_LINE / 2
         note = get_font(VALUE_FONT)
         for index, (name, _, kind, text) in enumerate(self.series):

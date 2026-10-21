@@ -24,7 +24,6 @@ class GUID(ctypes.Structure):
 
 
 class DisplayState(threading.Thread):
-    # Windows tells a window when the displays go off, dim or come back
 
     def __init__(self):
         super().__init__(name='display-state', daemon=True)
