@@ -112,9 +112,18 @@ class ReadoutCard(CardBase):
 
 class ValueCard(ReadoutCard):
 
-    def __init__(self, parent, theme, label, description='', value=''):
+    def __init__(self, parent, theme, label, description='', value='', warn=False):
         super().__init__(parent, theme, label, description)
         self.value = value
+        self.warn = warn
+
+    def set_value(self, value, description=None):
+        changed = self.set_text(description=description)
+        if value != self.value:
+            self.value = value
+            changed = True
+        if changed:
+            self.Refresh()
 
     def draw_control(self, gc, width, height):
         right = width - self.PADDING
@@ -122,7 +131,7 @@ class ValueCard(ReadoutCard):
             return right
         font = get_font(VALUE_FONT, bold=True)
         text_width = get_text_width(font, self.value)
-        gc.SetFont(font, wx.Colour(self.theme['text']))
+        gc.SetFont(font, wx.Colour(self.theme['warn' if self.warn else 'text']))
         gc.DrawText(self.value, right - text_width, (height - gc.GetTextExtent(self.value)[1]) / 2)
         return right - text_width
 

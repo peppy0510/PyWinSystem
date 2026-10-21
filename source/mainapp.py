@@ -108,7 +108,7 @@ class MainFrame(wx.Frame):
         self.resourcebox = ResourceBox(self.book, theme, self.folds, self.store_settings)
         self.hardwarebox = HardwareBox(self.book, theme, self.folds, self.store_settings)
         self.diskbox = DiskBox(self.book, theme, self.folds, self.store_settings,
-                               self.resourcebox.set_disk_names)
+                               self.resourcebox.set_disk_names, self.quit)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
                                        self.folds, self.store_settings)
         for page in (self.resourcebox, self.hardwarebox, self.diskbox, self.settingsbox):

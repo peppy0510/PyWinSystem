@@ -85,8 +85,10 @@ class HardwareBox(ScrollArea):
 
         body = []
         for nic in found.get('nics', []):
-            state = 'virtual' if nic['virtual'] else ('connected' if nic['connected']
-                                                        else 'not connected')
+            if nic['virtual']:
+                state = 'virtual'
+            else:
+                state = 'connected' if nic['connected'] else 'not connected'
             body.append(ValueCard(board, theme, nic['device'] or nic['name'],
                                   join(nic['name'], state, nic['driver']),
                                   format_speed(nic['speed']) if nic['connected'] else ''))

@@ -6,6 +6,9 @@
 * MAC, IPv4 and IPv6 of each adapter; the public IP is asked from cloudflare.com only when you press Look up.
 * Hardware page: processor, mainboard, each memory module with its part number and speed, and each display adapter with VRAM, PCIe link and driver.
 * Disk list with media, bus, size and the health Windows reports, Storage Spaces drives included.
+* Disk health: NVMe temperature, life used, spare, power-on time, data written and read, unsafe shutdowns and media errors without administrator rights; SATA SMART attributes after Run as administrator. A hard disk that is asleep is left asleep unless you press Read anyway.
+* GPU power against its limit, fan, core and memory clocks, and system uptime.
+* Network adapters on the Hardware page, and a tray icon with Close to tray.
 * Only performance counters are sampled, so an idle hard disk is not woken; the disk list is read at start and on request.
 * Auto, dark and light themes.
 
