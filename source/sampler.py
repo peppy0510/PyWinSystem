@@ -4,11 +4,6 @@
 '''
 author: Taehong Kim
 email: peppy0510@hotmail.com
-
-description:
-Samples CPU, memory, GPU, disk I/O and network, plus what WSL takes of each.
-Only performance counters are read, so an idle disk is not woken. WSL is read
-only while its VM runs, since touching \\wsl.localhost would start it.
 '''
 
 
@@ -68,7 +63,6 @@ def get_default_distro():
 
 
 class Rates:
-    # turns running counters into per-second rates
 
     def __init__(self):
         self.last = {}
@@ -125,6 +119,7 @@ class Wsl:
         self.rates = Rates()
 
     def find_process(self):
+        # \\wsl.localhost is touched only while the VM runs; touching it starts a stopped WSL
         if self.process is not None and self.process.is_running():
             return self.process
         self.process = None

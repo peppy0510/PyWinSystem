@@ -4,10 +4,6 @@
 '''
 author: Taehong Kim
 email: peppy0510@hotmail.com
-
-description:
-Physical disk list from the Windows storage stack. Read once at start and on
-request only, never on a timer, so a spun-down drive is left alone.
 '''
 
 
@@ -17,6 +13,7 @@ BUS_TYPES = {1: 'SCSI', 2: 'ATAPI', 3: 'ATA', 6: 'Fibre', 7: 'USB', 8: 'RAID', 1
 HEALTH = {0: 'Healthy', 1: 'Warning', 2: 'Unhealthy', 5: 'Unknown'}
 
 
+# read at start and on request only, never on a timer, so a spun-down drive is left alone
 def query_disks():
     import win32com.client
     service = win32com.client.GetObject(r'winmgmts:\\.\root\Microsoft\Windows\Storage')

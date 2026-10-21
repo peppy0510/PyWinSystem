@@ -19,7 +19,6 @@ from utilities import mix
 
 BAR_WIDTH = 150
 BAR_HEIGHT = 6
-# every number on the right of a row uses this size
 VALUE_FONT = 8.5
 VALUE_WIDTH = 34
 VALUE_GAP = 10
@@ -42,7 +41,6 @@ def format_rate(value):
 
 
 def get_ceiling(value):
-    # a round top for a rate axis: 1, 2 or 5 times a power of ten, in KB, MB or GB
     value = max(float(value or 0), 1024.0)
     unit = 1024.0
     while value > unit * 500:
@@ -58,7 +56,6 @@ def get_series_colour(theme, kind):
 
 
 def draw_series(gc, theme, values, kind, rect, capacity, pen=1.5):
-    # values 0..1 or None for a gap, the newest at the right edge of rect
     left, top, width, height = rect
     step = width / float(max(1, capacity - 1))
     start = left + width - step * (len(values) - 1)
@@ -94,7 +91,6 @@ def draw_series(gc, theme, values, kind, rect, capacity, pen=1.5):
 
 
 class ReadoutCard(CardBase):
-    # a row that only shows numbers; nothing to press
 
     def __init__(self, parent, theme, label, description=''):
         super().__init__(parent, theme, label, description)
@@ -115,7 +111,6 @@ class ReadoutCard(CardBase):
 
 
 class ValueCard(ReadoutCard):
-    # a label with one fixed value on the right
 
     def __init__(self, parent, theme, label, description='', value=''):
         super().__init__(parent, theme, label, description)
@@ -155,7 +150,8 @@ class MeterCard(ReadoutCard):
         font = get_font(VALUE_FONT, bold=True)
         text = '—' if value is None else '%d%%' % round(value * 100)
         gc.SetFont(font, wx.Colour(ink))
-        gc.DrawText(text, right - get_text_width(font, text), (height - gc.GetTextExtent(text)[1]) / 2)
+        gc.DrawText(text, right - get_text_width(font, text),
+                    (height - gc.GetTextExtent(text)[1]) / 2)
 
         bar_right = right - VALUE_WIDTH - VALUE_GAP
         bar_width = min(BAR_WIDTH, max(40, bar_right - self.PADDING - 120))
@@ -198,7 +194,6 @@ class RateCard(ReadoutCard):
         self.Refresh()
 
     def draw_spark(self, gc, right, height):
-        # the read side fills, the write side is a line, both scaled to this row
         left = right - self.SPARK_WIDTH
         if left - self.PADDING < self.LABEL_ROOM:
             return right
@@ -235,7 +230,6 @@ class RateCard(ReadoutCard):
 
 
 class CoreCard(ReadoutCard):
-    # one small column per logical processor
 
     def __init__(self, parent, theme, label, description=''):
         super().__init__(parent, theme, label, description)
@@ -276,7 +270,6 @@ LEGEND_SWATCH = 12
 
 
 class GraphCard(ReadoutCard):
-    # load over time, newest on the right; an area and an optional line
 
     def __init__(self, parent, theme, label, capacity):
         super().__init__(parent, theme, label)
@@ -287,8 +280,7 @@ class GraphCard(ReadoutCard):
         self.scale = ''
 
     def set_series(self, series, span, scale=''):
-        # series: [(name, values, 'area' or 'line')], values 0..1 or None for a gap;
-        # scale names the top line when the values are not percentages
+        # series: [(name, values 0..1 or None, 'area' or 'line')]
         self.series = series
         self.span = span
         self.scale = scale

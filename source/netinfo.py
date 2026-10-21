@@ -4,10 +4,6 @@
 '''
 author: Taehong Kim
 email: peppy0510@hotmail.com
-
-description:
-Adapter addresses from Windows, and the public address on request only.
-The public lookup asks an outside server, so it never runs on a timer.
 '''
 
 
@@ -31,7 +27,6 @@ def get_addresses():
                 entry['ipv4'].append(item.address)
             elif item.family == socket.AF_INET6:
                 entry['ipv6'].append(item.address.split('%')[0])
-        # link-local addresses only matter when there is nothing else
         wide = [address for address in entry['ipv6'] if not address.lower().startswith('fe80')]
         entry['ipv6'] = wide or entry['ipv6']
         addresses[name] = entry
@@ -57,6 +52,7 @@ def parse_trace(text):
     return None
 
 
+# asks an outside server, so it runs on a button press and never on a timer
 def lookup_public_ip():
     request = urllib.request.Request(TRACE_URL, headers={'User-Agent': 'PyWinSystem'})
     with urllib.request.urlopen(request, timeout=5) as response:
