@@ -20,6 +20,7 @@ from sampler import Sampler
 from settingsbox import SettingsBox
 from sidemenu import SideMenu
 from titlebar import TitleBar
+from tray import TrayIcon
 from utilities import APP_NAME
 from utilities import THEMES
 from utilities import apply_clip_siblings
@@ -74,7 +75,6 @@ class SamplerThread(threading.Thread):
                 time.sleep(delay)
             else:
                 target = time.perf_counter()
-            # nobody looks at a hidden window, so skip the work
             if not self.running or not self.visible:
                 continue
             try:
@@ -89,6 +89,8 @@ class MainFrame(wx.Frame):
     stored_rect = None
     started = False
     restore_bounds = None
+    tray = None
+    quitting = False
 
     def __init__(self):
         settings = load_settings()
@@ -233,8 +235,29 @@ class MainFrame(wx.Frame):
             self.theme_name = theme_name
             self.apply_theme()
         self.sampler.interval = float(values['interval'])
+        if values['tray_icon'] and self.tray is None:
+            self.tray = TrayIcon(self)
+        elif not values['tray_icon'] and self.tray is not None:
+            self.remove_tray()
         self.resourcebox.set_interval(values['interval'])
         self.store_settings()
+
+    def remove_tray(self):
+        self.tray.RemoveIcon()
+        self.tray.Destroy()
+        self.tray = None
+
+    def quit(self):
+        self.quitting = True
+        self.Close(True)
+
+    def show_window(self):
+        if self.IsIconized():
+            self.Iconize(False)
+        self.Show()
+        self.Raise()
+        self.SetFocus()
+        self.sampler.visible = True
 
     def on_sample(self, data):
         if self:
@@ -255,6 +278,18 @@ class MainFrame(wx.Frame):
         save_settings(settings)
 
     def on_close(self, event):
+        values = self.settingsbox.get_values()
+        if (self.tray is not None and values['close_to_tray'] and not self.quitting
+                and event.CanVeto()):
+            event.Veto()
+            if self.IsIconized() is False and self.IsMaximized() is False:
+                self.stored_rect = list(self.GetRect())
+            self.store_settings()
+            # a second launch may have shown the window behind wx's back
+            self.Show(True)
+            self.Hide()
+            self.sampler.visible = False
+            return
         self.sampler.running = False
         # the drawer's capture and slide timer crash a closing frame (0xc0000374)
         self.sidemenu.close()
@@ -264,6 +299,9 @@ class MainFrame(wx.Frame):
         elif self.IsIconized() is False and self.IsMaximized() is False:
             self.stored_rect = list(self.GetRect())
         self.store_settings()
+        # a live tray icon keeps the app running after the frame is gone
+        if self.tray is not None:
+            self.remove_tray()
         event.Skip()
 
 

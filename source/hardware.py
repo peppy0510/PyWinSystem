@@ -4,10 +4,6 @@
 '''
 author: Taehong Kim
 email: peppy0510@hotmail.com
-
-description:
-What the PC is built from: processor, memory modules and graphics adapters.
-Read once at start; none of it changes while Windows runs.
 '''
 
 
@@ -63,7 +59,22 @@ def read_wmi():
     if boards:
         board = ' '.join(part.strip() for part in (boards[0].Manufacturer, boards[0].Product)
                          if part)
-    return modules, adapters, board
+    service = win32com.client.GetObject(r'winmgmts:\\.\root\StandardCimv2')
+    nics = []
+    for item in query(service, 'SELECT Name, InterfaceDescription, Speed, DriverVersionString, '
+                               'DriverProvider, MediaConnectState, Virtual FROM MSFT_NetAdapter'):
+        nics.append({'name': (item.Name or '').strip(),
+                     'device': (item.InterfaceDescription or '').strip(),
+                     'speed': int(item.Speed or 0),
+                     'driver': join_parts(item.DriverProvider, item.DriverVersionString),
+                     'connected': item.MediaConnectState == 1,
+                     'virtual': bool(item.Virtual)})
+    nics.sort(key=lambda nic: (nic['virtual'], not nic['connected'], nic['name']))
+    return modules, adapters, board, nics
+
+
+def join_parts(*parts):
+    return ' '.join(str(part).strip() for part in parts if part)
 
 
 def read_nvidia():
@@ -93,7 +104,7 @@ def read_hardware():
     import pythoncom
     pythoncom.CoInitialize()
     try:
-        modules, adapters, board = read_wmi()
+        modules, adapters, board, nics = read_wmi()
     finally:
         pythoncom.CoUninitialize()
     driver, details = read_nvidia()
@@ -103,4 +114,4 @@ def read_hardware():
             adapter.update(detail)
             adapter['driver'] = driver or adapter['driver']
     return {'cpu': read_cpu(), 'memory': modules, 'total': psutil.virtual_memory().total,
-            'gpus': adapters, 'board': board}
+            'gpus': adapters, 'board': board, 'nics': nics}

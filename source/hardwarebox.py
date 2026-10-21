@@ -22,6 +22,15 @@ def join(*parts):
     return ' · '.join(str(part) for part in parts if part)
 
 
+def format_speed(bits):
+    if not bits:
+        return ''
+    for unit, size in (('Gbps', 10 ** 9), ('Mbps', 10 ** 6), ('Kbps', 10 ** 3)):
+        if bits >= size:
+            return ('%g %s' % (round(bits / float(size), 1), unit))
+    return '%d bps' % bits
+
+
 def describe_module(module):
     speed = '%d MT/s' % module['configured'] if module.get('configured') else ''
     return join(module['maker'], module['part'], module['type'], speed)
@@ -73,6 +82,16 @@ class HardwareBox(ScrollArea):
                                        if gpu.get('driver') else ''),
                                   format_bytes(gpu['vram']) if gpu.get('vram') else ''))
         panels.append(self.add_panel('gpu', 'Graphics', body))
+
+        body = []
+        for nic in found.get('nics', []):
+            state = 'virtual' if nic['virtual'] else ('connected' if nic['connected']
+                                                        else 'not connected')
+            body.append(ValueCard(board, theme, nic['device'] or nic['name'],
+                                  join(nic['name'], state, nic['driver']),
+                                  format_speed(nic['speed']) if nic['connected'] else ''))
+        if body:
+            panels.append(self.add_panel('network', 'Network adapters', body))
 
         self.set_panels(panels)
         self.bind_children()
