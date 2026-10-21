@@ -33,12 +33,6 @@ def get_ratio(used, total):
     return used / float(total) if total else None
 
 
-def get_io_text(pair, first='R', second='W'):
-    if not pair:
-        return '—'
-    return '%s %s   %s %s' % (first, format_rate(pair[0]), second, format_rate(pair[1]))
-
-
 class ResourceBox(ScrollArea):
 
     def __init__(self, parent, theme, folds=None, on_fold=None):
@@ -82,8 +76,8 @@ class ResourceBox(ScrollArea):
             cards[key] = GraphCard(board, theme, label, HISTORY)
             return cards[key]
 
-        def rate(key, label, description=''):
-            cards[key] = RateCard(board, theme, label, description)
+        def rate(key, label, description='', names=('R', 'W')):
+            cards[key] = RateCard(board, theme, label, description, names)
             return cards[key]
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
@@ -122,7 +116,7 @@ class ResourceBox(ScrollArea):
         body.append(graph('graph.disk', 'Physical disks over time'))
         panels.append(self.add_panel('disk', 'Disk I/O', body))
 
-        body = [rate('net:' + name, name) for name in data['networks']]
+        body = [rate('net:' + name, name, names=('Down', 'Up')) for name in data['networks']]
         cards['public'] = ActionCard(board, theme, 'Public IP', self.get_public_text(), 'Look up',
                                      self.look_up)
         cards['public'].set_captions('Looking up')
@@ -130,7 +124,8 @@ class ResourceBox(ScrollArea):
         if wsl:
             mirrored = wsl['config'].get('networking') == 'mirrored'
             body.append(rate('wsl.network', 'WSL', 'Part of the adapters above'
-                             if mirrored else 'Through the WSL virtual adapter'))
+                             if mirrored else 'Through the WSL virtual adapter',
+                             ('Down', 'Up')))
         body.append(graph('graph.network', 'All adapters over time'))
         panels.append(self.add_panel('network', 'Network', body))
 
@@ -182,10 +177,10 @@ class ResourceBox(ScrollArea):
                 format_bytes(gpu['used']), format_bytes(gpu['total'])))
 
         for name, pair in data['disks'].items():
-            cards['disk:' + name].set_rates(get_io_text(pair))
+            cards['disk:' + name].set_rates(pair)
         addresses = data.get('addresses') or {}
         for name, pair in data['networks'].items():
-            cards['net:' + name].set_rates(get_io_text(pair, 'Down', 'Up'),
+            cards['net:' + name].set_rates(pair,
                                            netinfo.describe(addresses.get(name)))
 
         if wsl:
@@ -285,8 +280,8 @@ class ResourceBox(ScrollArea):
         else:
             cards['wsl.memory'].set_value(None, '%s on Windows' % format_bytes(
                 wsl.get('host_memory')))
-        cards['wsl.disk'].set_rates(get_io_text(wsl.get('disk')))
-        cards['wsl.network'].set_rates(get_io_text(wsl.get('network'), 'Down', 'Up'))
+        cards['wsl.disk'].set_rates(wsl.get('disk'))
+        cards['wsl.network'].set_rates(wsl.get('network'))
 
     def tick(self):
         pass

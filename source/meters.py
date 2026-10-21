@@ -112,24 +112,45 @@ class MeterCard(ReadoutCard):
 
 
 class RateCard(ReadoutCard):
+    # two rates in fixed columns, so changing digits never move the label's room
 
-    text = ''
+    NAME_GAP = 5
+    PAIR_GAP = 16
+    WIDEST = '999.9 MB/s'
 
-    def set_rates(self, text, description=None):
+    def __init__(self, parent, theme, label, description='', names=('R', 'W')):
+        super().__init__(parent, theme, label, description)
+        self.names = names
+        self.pair = None
+
+    def set_rates(self, pair, description=None):
         changed = self.set_text(description=description)
-        if text != self.text:
-            self.text = text
+        if pair != self.pair:
+            self.pair = pair
             changed = True
         if changed:
             self.Refresh()
 
     def draw_control(self, gc, width, height):
-        font = get_font(9.5, bold=True)
-        right = width - self.PADDING
-        text_width = get_text_width(font, self.text)
-        gc.SetFont(font, wx.Colour(self.theme['text']))
-        gc.DrawText(self.text, right - text_width, (height - gc.GetTextExtent(self.text)[1]) / 2)
-        return right - text_width
+        theme = self.theme
+        value_font, name_font = get_font(9.5, bold=True), get_font(8.5)
+        column = get_text_width(value_font, self.WIDEST)
+        values = ('—', '—') if self.pair is None else tuple(format_rate(value)
+                                                            for value in self.pair)
+        x = width - self.PADDING
+        for index in (1, 0):
+            text = values[index]
+            gc.SetFont(value_font, wx.Colour(theme['text']))
+            gc.DrawText(text, x - get_text_width(value_font, text),
+                        (height - gc.GetTextExtent(text)[1]) / 2)
+            x -= column + self.NAME_GAP
+            name = self.names[index]
+            gc.SetFont(name_font, wx.Colour(theme['dim']))
+            x -= get_text_width(name_font, name)
+            gc.DrawText(name, x, (height - gc.GetTextExtent(name)[1]) / 2)
+            if index:
+                x -= self.PAIR_GAP
+        return x
 
 
 class CoreCard(ReadoutCard):
