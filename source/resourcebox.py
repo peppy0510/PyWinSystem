@@ -29,7 +29,7 @@ from meters import RateCard
 from meters import ValueCard
 from meters import format_bytes
 from meters import format_rate
-from meters import get_ceiling
+from meters import get_rate_scale
 from meters import get_watt_ceiling
 from utilities import call_painted
 
@@ -444,13 +444,14 @@ class ResourceBox(ScrollArea):
         span, cards = self.get_span(), self.cards
         for key, names in (('disk', ('Read', 'Write')), ('network', ('Down', 'Up'))):
             incoming, outgoing = list(history[key + '.in']), list(history[key + '.out'])
-            ceiling = get_ceiling(max(incoming + outgoing + [0]))
+            scale = get_rate_scale(max(incoming + outgoing + [0]))
+            ceiling = scale[0]
             cards['graph.' + key].set_series([
                 (names[0], [value / ceiling for value in incoming], 'area',
-                 format_rate(incoming[-1])),
+                 format_rate(incoming[-1], scale)),
                 (names[1], [value / ceiling for value in outgoing], 'line',
-                 format_rate(outgoing[-1]))],
-                span, format_rate(ceiling))
+                 format_rate(outgoing[-1], scale))],
+                span, format_rate(ceiling, scale))
         for key, name in (('cpu', 'CPU'), ('memory', 'Memory')):
             series = [(name, list(history[key]), 'area', format_percent(history[key][-1]))]
             if any(value is not None for value in history[key + '.wsl']):

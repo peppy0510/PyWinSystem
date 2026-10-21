@@ -46,19 +46,24 @@ def format_bytes(value):
         value /= 1024
 
 
-def format_rate(value):
-    return format_bytes(value) + '/s'
+def get_rate_scale(peak):
+    # a row keeps the unit of its graph's top, so readings change unit only when the graph
+    # rescales; KB/s is the smallest
+    peak = max(float(peak or 0), 1024.0)
+    unit, name = 1024.0, 'KB/s'
+    for bigger in ('MB/s', 'GB/s', 'TB/s'):
+        if peak <= unit * 500:
+            break
+        unit, name = unit * 1024, bigger
+    ceiling = next((unit * step for step in (1, 2, 5, 10, 20, 50, 100, 200, 500)
+                    if peak <= unit * step), peak)
+    return ceiling, unit, name
 
 
-def get_ceiling(value):
-    value = max(float(value or 0), 1024.0)
-    unit = 1024.0
-    while value > unit * 500:
-        unit *= 1024
-    for step in (1, 2, 5, 10, 20, 50, 100, 200, 500):
-        if value <= unit * step:
-            return unit * step
-    return value
+def format_rate(value, scale):
+    ceiling, unit, name = scale
+    digits = 1 if ceiling / unit <= 10 else 0
+    return '%.*f %s' % (digits, (value or 0) / unit, name)
 
 
 def get_unit_width():
@@ -234,8 +239,10 @@ class RateCard(ReadoutCard):
     def draw_control(self, gc, width, height):
         theme = self.theme
         left, slot_right, value_left, right = self.get_grid(width)
+        peaks = [value for values in self.history for value in values if value]
+        scale = get_rate_scale(max(peaks) if peaks else 0)
         # the two rates stack in the value column; the names keep a fixed left edge
-        values = ('—', '—') if self.pair is None else tuple(format_rate(value)
+        values = ('—', '—') if self.pair is None else tuple(format_rate(value, scale)
                                                             for value in self.pair)
         for index, middle in enumerate((height / 2 - self.LINE_GAP,
                                         height / 2 + self.LINE_GAP)):
@@ -248,8 +255,7 @@ class RateCard(ReadoutCard):
         top = (height - self.SPARK_HEIGHT) / 2
         spark_width = slot_right - left
         fill_rect(gc, theme['rim'], left, top + self.SPARK_HEIGHT, spark_width, 1)
-        peaks = [value for values in self.history for value in values if value]
-        ceiling = get_ceiling(max(peaks)) if peaks else 1.0
+        ceiling = scale[0]
         for values, kind in zip(self.history, ('area', 'line')):
             draw_series(gc, theme, [None if value is None else value / ceiling
                                     for value in values], kind,
