@@ -35,6 +35,8 @@ from utilities import call_painted
 
 
 HISTORY = 300
+HDD_ASLEEP = 0.8
+MONITOR_OFF = 0.3
 # a row graph is only about 100 px wide, so it shows the last minute
 ROW_HISTORY = 60
 
@@ -76,6 +78,7 @@ class ResourceBox(ScrollArea):
         self.history = collections.defaultdict(lambda: collections.deque(maxlen=HISTORY))
         self.interval = 1.0
         self.energy = energy.EnergyLog()
+        self.display = None
         self.electricity = {}
         self.tariffs = energy.load_tariffs()
         self.tariff_time = self.get_tariff_time()
@@ -129,11 +132,14 @@ class ResourceBox(ScrollArea):
         panels.append(self.add_panel('sensors', 'Temperature and power',
                                      self.build_sensors(data)))
         if 'sensor.total' in cards:
-            for key, label in (('cost.wall', 'Wall power'), ('cost.rate', 'At this rate'),
-                               ('cost.today', 'Today'), ('cost.month', 'This month')):
+            keys = (('cost.case', 'Inside the case'), ('cost.monitors', 'Monitors'),
+                    ('cost.wall', 'Wall power'), ('cost.rate', 'At this rate'),
+                    ('cost.today', 'Today'), ('cost.month', 'This month'))
+            for key, label in keys:
                 cards[key] = ValueCard(board, theme, label)
-            panels.append(self.add_panel('electricity', 'Electricity', [
-                cards[key] for key in ('cost.wall', 'cost.rate', 'cost.today', 'cost.month')]))
+            panels.append(self.add_panel('electricity', 'Electricity',
+                                         [cards[key] for key, _ in keys],
+                                         'Drives, monitors and the rest are estimates'))
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
                 graph('graph.cpu', 'CPU over time')]
@@ -280,6 +286,31 @@ class ResourceBox(ScrollArea):
         plan = self.electricity.get('plan', 'kr_home')
         return self.tariffs.get(plan) or self.tariffs['kr_home']
 
+    def get_drive_watts(self, data):
+        sensors = data['sensors']
+        watts = 0.0
+        for number, states in (sensors.get('nvme_power') or {}).items():
+            if not states:
+                continue
+            # busy reads as the top state; idle as the lowest, where Windows parks an idle
+            # drive on its own (APST)
+            busy = any(data['disks'].get('PhysicalDrive%d' % number) or (0, 0))
+            watts += max(power for power, _ in states) if busy else min(
+                power for power, _ in states)
+        for number, spinning in (sensors.get('spinning') or {}).items():
+            watts += float(self.electricity.get('hdd_watts', 6)) if spinning else HDD_ASLEEP
+        return watts
+
+    def get_monitor_watts(self):
+        count = wx.Display.GetCount()
+        state = self.display.state if self.display else 'on'
+        each = float(self.electricity.get('monitor_watts', 25))
+        if state == 'off':
+            return count * MONITOR_OFF, '%d off' % count
+        if state is None:
+            return count * each, '%d, on state unknown, %.0f W each' % (count, each)
+        return count * each, '%d %s, %.0f W each' % (count, state, each)
+
     def set_cost(self, data):
         cards = self.cards
         now = time.monotonic()
@@ -287,12 +318,19 @@ class ResourceBox(ScrollArea):
         self.sampled = now
         if 'cost.wall' not in cards:
             return
-        parts = data['sensors']['cpu_power'].get('package', 0.0) + sum(
-            gpu.get('power') or 0.0 for gpu in data['gpus'])
-        other = float(self.electricity.get('other_watts', 40))
+        cpu = data['sensors']['cpu_power'].get('package', 0.0)
+        gpus = sum(gpu.get('power') or 0.0 for gpu in data['gpus'])
+        drives = self.get_drive_watts(data)
+        other = float(self.electricity.get('other_watts', 30))
         efficiency = max(1.0, float(self.electricity.get('psu_efficiency', 90)))
-        wall = (parts + other) * 100.0 / efficiency
+        case = cpu + gpus + drives + other
+        monitors, monitor_note = self.get_monitor_watts()
+        # monitors draw from the wall themselves, not through the power supply
+        wall = case * 100.0 / efficiency + monitors
         self.energy.add(wall, seconds)
+        cards['cost.case'].set_value('%.0f W' % case, 'CPU %.0f · GPUs %.0f · drives %.0f · '
+                                     'rest %.0f W' % (cpu, gpus, drives, other))
+        cards['cost.monitors'].set_value('%.0f W' % monitors, monitor_note)
 
         tariff, month = self.get_tariff(), time.localtime().tm_mon
         household = float(self.electricity.get('household_kwh', 250))
@@ -303,8 +341,8 @@ class ResourceBox(ScrollArea):
 
         monthly = wall / 1000.0 * 24 * energy.DAYS_PER_MONTH
         month_cost = energy.get_share(monthly, household, tariff, month)
-        cards['cost.wall'].set_value('%.0f W' % wall, 'CPU and GPUs %.0f W + other %.0f W, '
-                                     'at %.0f%% efficiency' % (parts, other, efficiency))
+        cards['cost.wall'].set_value('%.0f W' % wall, 'The case at %.0f%% efficiency, '
+                                     'plus the monitors' % efficiency)
         cards['cost.rate'].set_value(money(month_cost / (24 * energy.DAYS_PER_MONTH)) + ' / h',
                                      'Day %s · month %s · %s' % (
                                          money(month_cost / energy.DAYS_PER_MONTH),

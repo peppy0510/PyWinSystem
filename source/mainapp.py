@@ -14,6 +14,7 @@ import winreg
 import wx
 
 from diskbox import DiskBox
+from displaystate import DisplayState
 from hardwarebox import HardwareBox
 from resourcebox import ResourceBox
 from sampler import Sampler
@@ -124,6 +125,8 @@ class MainFrame(wx.Frame):
         self.SetSizer(sizer)
 
         self.sampler = SamplerThread(self)
+        self.resourcebox.display = DisplayState()
+        self.resourcebox.display.start()
         self.apply_theme()
         self.on_settings()
 
@@ -262,8 +265,7 @@ class MainFrame(wx.Frame):
 
     def on_disks(self, found):
         self.resourcebox.set_disk_names(found)
-        self.sampler.sampler.sensors.set_nvme(
-            disk['number'] for disk in found if disk['bus'] == 'NVMe')
+        self.sampler.sampler.sensors.set_disks(found)
 
     def on_sample(self, data):
         if self:

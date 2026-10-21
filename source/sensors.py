@@ -93,12 +93,21 @@ class Sensors:
     def __init__(self):
         self.energy = EnergyMeter()
         self.monitor = HardwareMonitor()
-        self.nvme = []
+        self.nvme = {}
+        self.hdd = []
         self.count = 0
-        self.slow = {'nvme': {}, 'monitor': None}
+        self.slow = {'nvme': {}, 'nvme_power': {}, 'spinning': {}, 'monitor': None}
 
-    def set_nvme(self, numbers):
-        self.nvme = list(numbers)
+    def set_disks(self, found):
+        nvme = {}
+        for disk in found:
+            if disk['bus'] == 'NVMe':
+                try:
+                    nvme[disk['number']] = smart.read_nvme_power(disk['number'])
+                except Exception:
+                    nvme[disk['number']] = None
+        self.nvme = nvme
+        self.hdd = [disk['number'] for disk in found if disk['media'] == 'HDD']
         self.count = 0
 
     def sample(self):
@@ -112,6 +121,8 @@ class Sensors:
                     health = None
                 if health:
                     temps[number] = health['temperature']
-            self.slow = {'nvme': temps, 'monitor': self.monitor.sample()}
+            spinning = {number: smart.is_spinning(number) for number in self.hdd}
+            self.slow = {'nvme': temps, 'nvme_power': dict(self.nvme), 'spinning': spinning,
+                         'monitor': self.monitor.sample()}
         self.count += 1
         return dict(self.slow, cpu_power=self.energy.sample())

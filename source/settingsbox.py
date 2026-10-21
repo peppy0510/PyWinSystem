@@ -47,9 +47,15 @@ class SettingsBox(ScrollArea):
         self.household = SliderCard(board, theme, 'Rest of the home',
                                     'kWh a month without this PC, for stepped prices',
                                     (0, 2000, 10, 0), on_change, default=250)
-        self.other = SliderCard(board, theme, 'Other parts',
-                                'Watts the counters miss: board, memory, drives, fans',
-                                (0, 400, 5, 0), on_change, default=40)
+        self.other = SliderCard(board, theme, 'Rest of the case',
+                                'Mainboard, memory, fans and cards no counter reports',
+                                (0, 300, 5, 0), on_change, default=30)
+        self.hdd = SliderCard(board, theme, 'Hard disk, spinning',
+                              'Watts per hard disk while it spins; asleep counts 0.8 W',
+                              (0, 15, 0.5, 1), on_change, default=6)
+        self.monitor = SliderCard(board, theme, 'Each monitor',
+                                  'Watts per display while it is on; off counts 0.3 W',
+                                  (0, 200, 1, 0), on_change, default=25)
         self.efficiency = SliderCard(board, theme, 'Power supply efficiency',
                                      'Percent of wall power that reaches the parts',
                                      (50, 100, 1, 0), on_change, default=90)
@@ -59,7 +65,9 @@ class SettingsBox(ScrollArea):
         self.ontop.SetValue(settings.get('on_top', False))
         self.plan.SetValue(settings.get('plan', 'kr_home'))
         self.household.SetValue(settings.get('household_kwh', 250))
-        self.other.SetValue(settings.get('other_watts', 40))
+        self.other.SetValue(settings.get('other_watts', 30))
+        self.hdd.SetValue(settings.get('hdd_watts', 6))
+        self.monitor.SetValue(settings.get('monitor_watts', 25))
         self.efficiency.SetValue(settings.get('psu_efficiency', 90))
         self.tray.SetValue(settings.get('tray_icon', True))
         self.close_to_tray.SetValue(settings.get('close_to_tray', False))
@@ -74,7 +82,8 @@ class SettingsBox(ScrollArea):
             Panel(board, theme, 'settings.sampling', 'Sampling', (self.interval,), self.folds,
                   self.on_fold),
             Panel(board, theme, 'settings.electricity', 'Electricity',
-                  (self.plan, self.household, self.other, self.efficiency, self.rates),
+                  (self.plan, self.household, self.other, self.hdd, self.monitor,
+                   self.efficiency, self.rates),
                   self.folds, self.on_fold),
         ])
         self.bind_children()
@@ -85,7 +94,8 @@ class SettingsBox(ScrollArea):
                 'close_to_tray': self.close_to_tray.GetValue(),
                 'theme': self.theme_choice.GetValue(), 'interval': self.interval.GetValue(),
                 'plan': self.plan.GetValue(), 'household_kwh': self.household.GetValue(),
-                'other_watts': self.other.GetValue(),
+                'other_watts': self.other.GetValue(), 'hdd_watts': self.hdd.GetValue(),
+                'monitor_watts': self.monitor.GetValue(),
                 'psu_efficiency': self.efficiency.GetValue()}
 
     def open_rates(self):

@@ -23,6 +23,9 @@ NVME_PROTOCOL = 3
 NVME_LOG_PAGE = 2
 NVME_HEALTH_LOG = 2
 NVME_LOG_SIZE = 512
+NVME_IDENTIFY = 1
+NVME_IDENTIFY_CONTROLLER = 1
+NVME_IDENTIFY_SIZE = 4096
 PROTOCOL_DATA_OFFSET = 40
 
 SMART_RCV_DRIVE_DATA = 0x7C088
@@ -109,6 +112,31 @@ def read_nvme(number):
         'error_entries': read_uint(data, 176, 16),
         'warning_minutes': read_uint(data, 192, 4), 'critical_minutes': read_uint(data, 196, 4),
     }
+
+
+def read_nvme_power(number):
+    # the controller's power state table: (watts, operational) for each state
+    handle = open_disk(number)
+    if handle is None:
+        return None
+    try:
+        query = struct.pack('<II', STORAGE_PROTOCOL_PROPERTY, 0)
+        protocol = struct.pack('<IIIIII', NVME_PROTOCOL, NVME_IDENTIFY, NVME_IDENTIFY_CONTROLLER,
+                               0, PROTOCOL_DATA_OFFSET, NVME_IDENTIFY_SIZE)
+        buffer = ctypes.create_string_buffer(query + protocol + bytes(8 + NVME_IDENTIFY_SIZE + 64))
+        if not control(handle, IOCTL_STORAGE_QUERY_PROPERTY, buffer):
+            return None
+    finally:
+        kernel32.CloseHandle(handle)
+    start = 8 + PROTOCOL_DATA_OFFSET
+    data = buffer.raw[start:start + NVME_IDENTIFY_SIZE]
+    states = []
+    for index in range(data[263] + 1):
+        offset = 2048 + index * 32
+        flags = data[offset + 3]
+        scale = 0.0001 if flags & 1 else 0.01
+        states.append((read_uint(data, offset, 2) * scale, not flags & 2))
+    return states
 
 
 def read_ata(number):
