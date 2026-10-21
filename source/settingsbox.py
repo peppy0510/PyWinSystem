@@ -7,7 +7,7 @@ email: peppy0510@hotmail.com
 '''
 
 
-import os
+import subprocess
 
 import energy
 
@@ -89,11 +89,12 @@ class SettingsBox(ScrollArea):
                 'psu_efficiency': self.efficiency.GetValue()}
 
     def open_rates(self):
+        # .json often has no program attached, so ask for Notepad by name
         energy.load_tariffs()
         try:
-            os.startfile(energy.TARIFF_PATH)
-        except OSError:
-            pass
+            subprocess.Popen(['notepad.exe', energy.TARIFF_PATH])
+        except OSError as error:
+            self.rates.set_description('Could not open %s: %s' % (energy.TARIFF_PATH, error))
 
     def on_fold(self):
         self.relayout_panels()
