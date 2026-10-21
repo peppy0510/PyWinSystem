@@ -10,6 +10,7 @@ email: peppy0510@hotmail.com
 import wx
 
 from controls import CardBase
+from controls import draw_row_face
 from utilities import fill_rect
 from utilities import get_font
 from utilities import get_text_width
@@ -35,6 +36,18 @@ def format_bytes(value):
 
 def format_rate(value):
     return format_bytes(value) + '/s'
+
+
+def get_ceiling(value):
+    # a round top for a rate axis: 1, 2 or 5 times a power of ten, in KB, MB or GB
+    value = max(float(value or 0), 1024.0)
+    unit = 1024.0
+    while value > unit * 500:
+        unit *= 1024
+    for step in (1, 2, 5, 10, 20, 50, 100, 200, 500):
+        if value <= unit * step:
+            return unit * step
+    return value
 
 
 class ReadoutCard(CardBase):
@@ -149,3 +162,101 @@ class CoreCard(ReadoutCard):
                 colour = theme['warn'] if value >= HIGH * 100 else theme['accent']
                 fill_rect(gc, colour, x, top + CORE_HEIGHT - level, column, level, 1)
         return left
+
+
+GRAPH_HEIGHT = 112
+GRAPH_TOP = 30
+GRAPH_BOTTOM = 10
+LEGEND_GAP = 14
+LEGEND_SWATCH = 12
+
+
+class GraphCard(ReadoutCard):
+    # load over time, newest on the right; an area and an optional line
+
+    def __init__(self, parent, theme, label, capacity):
+        super().__init__(parent, theme, label)
+        self.SetMinSize(wx.Size(-1, GRAPH_HEIGHT))
+        self.capacity = capacity
+        self.series = []
+        self.span = ''
+        self.scale = ''
+
+    def set_series(self, series, span, scale=''):
+        # series: [(name, values, 'area' or 'line')], values 0..1 or None for a gap;
+        # scale names the top line when the values are not percentages
+        self.series = series
+        self.span = span
+        self.scale = scale
+        self.Refresh()
+
+    def get_colour(self, kind):
+        theme = self.theme
+        return theme['accent'] if kind == 'area' else mix(theme['accent'], theme['text'], 0.55)
+
+    def draw(self, gc, width, height):
+        theme = self.theme
+        draw_row_face(gc, theme, width, height, self.first, self.last)
+        font = get_font(9)
+        gc.SetFont(font, wx.Colour(theme['text']))
+        gc.DrawText(self.label, self.PADDING, 9)
+
+        right = width - self.PADDING
+        gc.SetFont(get_font(8), wx.Colour(theme['dim']))
+        span_width = get_text_width(get_font(8), self.span)
+        gc.DrawText(self.span, right - span_width, 10)
+        x = right - span_width - LEGEND_GAP
+        for name, _, kind in reversed(self.series):
+            text_width = get_text_width(get_font(8), name)
+            x -= text_width
+            gc.DrawText(name, x, 10)
+            x -= 5 + LEGEND_SWATCH
+            if kind == 'area':
+                fill_rect(gc, self.get_colour(kind), x, 13, LEGEND_SWATCH, 7, 1)
+            else:
+                fill_rect(gc, self.get_colour(kind), x, 16, LEGEND_SWATCH, 2)
+            x -= LEGEND_GAP
+
+        left, top = self.PADDING, GRAPH_TOP
+        plot_width, plot_height = right - left, height - GRAPH_TOP - GRAPH_BOTTOM
+        for level in (0.0, 0.5, 1.0):
+            fill_rect(gc, theme['rim'], left, top + plot_height * (1 - level), plot_width, 1)
+        if self.scale:
+            gc.SetFont(get_font(7.5), wx.Colour(theme['dim']))
+            gc.DrawText(self.scale, left + 2, top + 2)
+        step = plot_width / float(max(1, self.capacity - 1))
+        for _, values, kind in self.series:
+            self.draw_values(gc, values, kind, left, top, plot_width, plot_height, step)
+
+    def draw_values(self, gc, values, kind, left, top, plot_width, plot_height, step):
+        start = left + plot_width - step * (len(values) - 1)
+        runs, run = [], []
+        for index, value in enumerate(values):
+            if value is None:
+                if run:
+                    runs.append(run)
+                run = []
+                continue
+            run.append((start + step * index,
+                        top + plot_height * (1 - max(0.0, min(1.0, value)))))
+        if run:
+            runs.append(run)
+        colour = wx.Colour(self.get_colour(kind))
+        for run in runs:
+            path = gc.CreatePath()
+            path.MoveToPoint(*run[0])
+            for point in run[1:]:
+                path.AddLineToPoint(*point)
+            if kind == 'area':
+                area = gc.CreatePath()
+                area.MoveToPoint(run[0][0], top + plot_height)
+                for point in run:
+                    area.AddLineToPoint(*point)
+                area.AddLineToPoint(run[-1][0], top + plot_height)
+                area.CloseSubpath()
+                gc.SetPen(wx.TRANSPARENT_PEN)
+                gc.SetBrush(wx.Brush(wx.Colour(colour.Red(), colour.Green(), colour.Blue(), 70)))
+                gc.FillPath(area)
+            gc.SetPen(gc.CreatePen(wx.GraphicsPenInfo(colour).Width(1.5)))
+            gc.SetBrush(wx.TRANSPARENT_BRUSH)
+            gc.StrokePath(path)

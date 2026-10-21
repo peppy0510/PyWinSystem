@@ -230,6 +230,7 @@ class MainFrame(wx.Frame):
             self.theme_name = theme_name
             self.apply_theme()
         self.sampler.interval = float(values['interval'])
+        self.resourcebox.set_interval(values['interval'])
         self.store_settings()
 
     def on_sample(self, data):
