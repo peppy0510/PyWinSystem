@@ -7,6 +7,7 @@ email: peppy0510@hotmail.com
 '''
 
 
+import ctypes
 import platform
 import winreg
 
@@ -14,6 +15,8 @@ import psutil
 
 
 CPU_KEY = r'HARDWARE\DESCRIPTION\System\CentralProcessor\0'
+SECURE_BOOT_KEY = r'SYSTEM\CurrentControlSet\Control\SecureBoot\State'
+FIRMWARE_TYPES = {1: 'Legacy BIOS', 2: 'UEFI'}
 MEMORY_TYPES = {20: 'DDR', 21: 'DDR2', 24: 'DDR3', 26: 'DDR4', 34: 'DDR5', 35: 'LPDDR5'}
 
 
@@ -27,6 +30,22 @@ def read_cpu():
     except OSError:
         pass
     return cpu
+
+
+def read_firmware():
+    firmware = {'type': None, 'secure_boot': None}
+    kind = ctypes.c_int()
+    try:
+        if ctypes.windll.kernel32.GetFirmwareType(ctypes.byref(kind)):
+            firmware['type'] = FIRMWARE_TYPES.get(kind.value)
+    except Exception:
+        pass
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, SECURE_BOOT_KEY) as key:
+            firmware['secure_boot'] = bool(winreg.QueryValueEx(key, 'UEFISecureBootEnabled')[0])
+    except OSError:
+        pass
+    return firmware
 
 
 def query(service, sql):
@@ -59,6 +78,14 @@ def read_wmi():
     if boards:
         board = ' '.join(part.strip() for part in (boards[0].Manufacturer, boards[0].Product)
                          if part)
+    bios = None
+    for item in query(service, 'SELECT Manufacturer, SMBIOSBIOSVersion, ReleaseDate '
+                               'FROM Win32_BIOS'):
+        released = item.ReleaseDate or ''
+        bios = {'maker': (item.Manufacturer or '').strip(),
+                'version': (item.SMBIOSBIOSVersion or '').strip(),
+                'date': '%s-%s-%s' % (released[:4], released[4:6], released[6:8])
+                if len(released) >= 8 else ''}
     service = win32com.client.GetObject(r'winmgmts:\\.\root\StandardCimv2')
     nics = []
     for item in query(service, 'SELECT Name, InterfaceDescription, Speed, DriverVersionString, '
@@ -70,7 +97,7 @@ def read_wmi():
                      'connected': item.MediaConnectState == 1,
                      'virtual': bool(item.Virtual)})
     nics.sort(key=lambda nic: (nic['virtual'], not nic['connected'], nic['name']))
-    return modules, adapters, board, nics
+    return modules, adapters, board, nics, bios
 
 
 def join_parts(*parts):
@@ -104,7 +131,7 @@ def read_hardware():
     import pythoncom
     pythoncom.CoInitialize()
     try:
-        modules, adapters, board, nics = read_wmi()
+        modules, adapters, board, nics, bios = read_wmi()
     finally:
         pythoncom.CoUninitialize()
     driver, details = read_nvidia()
@@ -114,4 +141,5 @@ def read_hardware():
             adapter.update(detail)
             adapter['driver'] = driver or adapter['driver']
     return {'cpu': read_cpu(), 'memory': modules, 'total': psutil.virtual_memory().total,
-            'gpus': adapters, 'board': board, 'nics': nics}
+            'gpus': adapters, 'board': board, 'nics': nics, 'bios': bios,
+            'firmware': read_firmware()}

@@ -67,6 +67,13 @@ class HardwareBox(ScrollArea):
                           join('%s cores' % cpu['cores'], '%s threads' % cpu['threads'], clock))]
         if found.get('board'):
             body.append(ValueCard(board, theme, found['board'], 'Mainboard'))
+        bios, firmware = found.get('bios'), found.get('firmware') or {}
+        if bios:
+            secure = firmware.get('secure_boot')
+            if secure is not None:
+                secure = 'Secure Boot %s' % ('on' if secure else 'off')
+            body.append(ValueCard(board, theme, 'BIOS %s' % bios['version'], join(
+                bios['maker'], bios['date'], firmware.get('type'), secure)))
         panels.append(self.add_panel('cpu', 'Processor', body))
 
         modules = found['memory']
