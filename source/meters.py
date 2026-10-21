@@ -27,9 +27,9 @@ MIN_LABEL = 100
 BUSY_DELAY = 400
 BAR_HEIGHT = 6
 VALUE_FONT = 8.5
-# units sit left-aligned in a column of their own, so neither digits nor a unit change move them
-UNITS = ('%', '°C', 'W', 'B', 'KB', 'MB', 'GB', 'TB', 'B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s',
-         'bps', 'Kbps', 'Mbps', 'Gbps', 'h', 'rpm')
+# a rate can switch from B/s to KB/s, so rate units sit left-aligned in a column of their own;
+# a fixed unit stays put under plain right alignment
+UNITS = ('B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s')
 UNIT_PATTERN = '|'.join(re.escape(unit) for unit in sorted(UNITS, key=len, reverse=True))
 MEASURE = re.compile(r'^([\d.,]+)\s*(%s)$' % UNIT_PATTERN)
 UNIT_GAP = 3

@@ -314,8 +314,8 @@ class ResourceBox(ScrollArea):
         price = spent / used_month if used_month else 0.0
         cards['cost.today'].set_value(money(used_today * price),
                                       '%.2f kWh counted while this app ran' % used_today)
-        cards['cost.month'].set_value(money(spent), '%.1f kWh counted while this app ran'
-                                      % used_month)
+        cards['cost.month'].set_value(money(spent), '%s kWh counted while this app ran' % (
+            '%.2f' % used_month if used_month < 10 else '%.1f' % used_month))
 
     def on_fold(self):
         self.relayout_panels()
