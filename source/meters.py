@@ -23,7 +23,7 @@ VALUE_WIDTH = 46
 VALUE_GAP = 10
 HIGH = 0.9
 
-CORE_GAP = 2
+CORE_GAP = 4
 CORE_HEIGHT = 22
 
 
@@ -251,16 +251,18 @@ class CoreCard(ReadoutCard):
         right = width - self.PADDING
         if not count:
             return right
-        column = max(3, min(8, (right - self.PADDING - 140) // count - CORE_GAP))
-        left = right - count * (column + CORE_GAP) + CORE_GAP
+        # the same thickness and round ends as the horizontal meter bars
+        column, radius = BAR_HEIGHT, BAR_HEIGHT / 2
+        gap = max(1, min(CORE_GAP, (right - self.PADDING - 140) // count - column))
+        left = right - count * (column + gap) + gap
         top = (height - CORE_HEIGHT) / 2
         for index, value in enumerate(self.values):
-            x = left + index * (column + CORE_GAP)
-            fill_rect(gc, theme['track'], x, top, column, CORE_HEIGHT, 1)
-            level = CORE_HEIGHT * max(0, min(100, value)) / 100.0
-            if level >= 1:
+            x = left + index * (column + gap)
+            fill_rect(gc, theme['track'], x, top, column, CORE_HEIGHT, radius)
+            if value > 0:
+                level = max(column, CORE_HEIGHT * min(100, value) / 100.0)
                 colour = theme['warn'] if value >= HIGH * 100 else theme['accent']
-                fill_rect(gc, colour, x, top + CORE_HEIGHT - level, column, level, 1)
+                fill_rect(gc, colour, x, top + CORE_HEIGHT - level, column, level, radius)
         return left
 
 
