@@ -33,10 +33,11 @@ ROW_HISTORY = 60
 
 
 def format_uptime(seconds):
-    minutes = int(seconds) // 60
-    days, minutes = divmod(minutes, 1440)
-    hours, minutes = divmod(minutes, 60)
-    return '%dd %dh %dm' % (days, hours, minutes) if days else '%dh %dm' % (hours, minutes)
+    days, seconds = divmod(int(seconds), 86400)
+    hours, seconds = divmod(seconds, 3600)
+    minutes, seconds = divmod(seconds, 60)
+    return '%d %s %02d:%02d:%02d' % (days, 'day' if days == 1 else 'days', hours, minutes,
+                                     seconds)
 
 
 def get_power_text(gpu):
