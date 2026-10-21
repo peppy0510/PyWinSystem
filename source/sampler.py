@@ -19,6 +19,8 @@ import winreg
 
 import psutil
 
+import netinfo
+
 
 WSL_PROCESS = 'vmmemwsl'
 WSL_CONFIG = os.path.join(os.path.expanduser('~'), '.wslconfig')
@@ -230,5 +232,6 @@ class Sampler:
                                                      counters.bytes_sent), now)
             data['networks'][name] = rate or (0, 0)
 
+        data['addresses'] = netinfo.get_addresses()
         data['wsl'] = self.wsl.sample(now)
         return data

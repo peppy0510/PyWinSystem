@@ -9,6 +9,11 @@ email: peppy0510@hotmail.com
 
 import collections
 
+import threading
+
+import netinfo
+
+from controls import ActionCard
 from controls import Panel
 from controls import ScrollArea
 from meters import CoreCard
@@ -18,6 +23,7 @@ from meters import RateCard
 from meters import format_bytes
 from meters import format_rate
 from meters import get_ceiling
+from utilities import call_painted
 
 
 HISTORY = 300
@@ -44,6 +50,8 @@ class ResourceBox(ScrollArea):
         self.disk_names = {}
         self.history = collections.defaultdict(lambda: collections.deque(maxlen=HISTORY))
         self.interval = 1.0
+        self.public_ip = None
+        self.looking_up = False
         self.apply_theme(theme)
 
     def set_disk_names(self, disks):
@@ -115,6 +123,10 @@ class ResourceBox(ScrollArea):
         panels.append(self.add_panel('disk', 'Disk I/O', body))
 
         body = [rate('net:' + name, name) for name in data['networks']]
+        cards['public'] = ActionCard(board, theme, 'Public IP', self.get_public_text(), 'Look up',
+                                     self.look_up)
+        cards['public'].set_captions('Looking up')
+        body.append(cards['public'])
         if wsl:
             mirrored = wsl['config'].get('networking') == 'mirrored'
             body.append(rate('wsl.network', 'WSL', 'Part of the adapters above'
@@ -171,12 +183,44 @@ class ResourceBox(ScrollArea):
 
         for name, pair in data['disks'].items():
             cards['disk:' + name].set_rates(get_io_text(pair))
+        addresses = data.get('addresses') or {}
         for name, pair in data['networks'].items():
-            cards['net:' + name].set_rates(get_io_text(pair, 'Down', 'Up'))
+            cards['net:' + name].set_rates(get_io_text(pair, 'Down', 'Up'),
+                                           netinfo.describe(addresses.get(name)))
 
         if wsl:
             self.set_wsl(wsl, cpu)
         self.set_history(data)
+
+    def get_public_text(self):
+        if self.public_ip:
+            return self.public_ip
+        return 'Asks cloudflare.com once each time you press it'
+
+    def look_up(self):
+        if self.looking_up:
+            return
+        self.looking_up = True
+        self.cards['public'].set_caption('Looking up')
+
+        def work():
+            try:
+                address = netinfo.lookup_public_ip()
+            except Exception:
+                address = None
+            call_painted(self, self.set_public_ip, address)
+        threading.Thread(target=work, daemon=True).start()
+
+    def set_public_ip(self, address):
+        if not self:
+            return
+        self.looking_up = False
+        card = self.cards.get('public')
+        if address:
+            self.public_ip = address
+        if card:
+            card.set_caption('Look up')
+            card.set_description(self.get_public_text() if address else 'No answer · try again')
 
     def set_interval(self, interval):
         self.interval = float(interval)
