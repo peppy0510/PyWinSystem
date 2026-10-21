@@ -71,6 +71,24 @@ class ReadoutCard(CardBase):
         return wx.Rect()
 
 
+class ValueCard(ReadoutCard):
+    # a label with one fixed value on the right
+
+    def __init__(self, parent, theme, label, description='', value=''):
+        super().__init__(parent, theme, label, description)
+        self.value = value
+
+    def draw_control(self, gc, width, height):
+        right = width - self.PADDING
+        if not self.value:
+            return right
+        font = get_font(9.5, bold=True)
+        text_width = get_text_width(font, self.value)
+        gc.SetFont(font, wx.Colour(self.theme['text']))
+        gc.DrawText(self.value, right - text_width, (height - gc.GetTextExtent(self.value)[1]) / 2)
+        return right - text_width
+
+
 class MeterCard(ReadoutCard):
 
     value = None

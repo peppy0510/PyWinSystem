@@ -37,6 +37,16 @@ def draw_disk(gc, cx, cy, size, colour, width):
     gc.DrawEllipse(cx + size * 0.20 - dot / 2, cy + size * 0.18 - dot / 2, dot, dot)
 
 
+def draw_chip(gc, cx, cy, size, colour, width):
+    half = size * 0.26
+    gc.DrawRoundedRectangle(cx - half, cy - half, half * 2, half * 2, size * 0.05)
+    for offset in (-size * 0.12, size * 0.12):
+        gc.StrokeLine(cx + offset, cy - half, cx + offset, cy - size * 0.44)
+        gc.StrokeLine(cx + offset, cy + half, cx + offset, cy + size * 0.44)
+        gc.StrokeLine(cx - half, cy + offset, cx - size * 0.44, cy + offset)
+        gc.StrokeLine(cx + half, cy + offset, cx + size * 0.44, cy + offset)
+
+
 def draw_chart(gc, cx, cy, size, colour, width):
     base = cy + size * 0.38
     gc.StrokeLine(cx - size * 0.42, base, cx + size * 0.42, base)
@@ -108,6 +118,7 @@ def draw_person(gc, cx, cy, size, colour, width):
 
 HANDLERS = {
     'disk': draw_disk,
+    'chip': draw_chip,
     'chart': draw_chart,
     'settings': draw_settings,
     'menu': draw_menu,

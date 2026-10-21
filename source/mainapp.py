@@ -14,6 +14,7 @@ import winreg
 import wx
 
 from diskbox import DiskBox
+from hardwarebox import HardwareBox
 from resourcebox import ResourceBox
 from sampler import Sampler
 from settingsbox import SettingsBox
@@ -33,7 +34,8 @@ from utilities import save_settings
 
 DEFAULT_SIZE = (460, 720)
 
-MENU_ITEMS = (('Resources', 'chart'), ('Disks', 'disk'), None, ('Settings', 'settings'))
+MENU_ITEMS = (('Resources', 'chart'), ('Hardware', 'chip'), ('Disks', 'disk'), None,
+              ('Settings', 'settings'))
 
 FRAME_STYLE = wx.DEFAULT_FRAME_STYLE & ~wx.CAPTION
 
@@ -102,11 +104,12 @@ class MainFrame(wx.Frame):
 
         self.book = wx.Simplebook(self)
         self.resourcebox = ResourceBox(self.book, theme, self.folds, self.store_settings)
+        self.hardwarebox = HardwareBox(self.book, theme, self.folds, self.store_settings)
         self.diskbox = DiskBox(self.book, theme, self.folds, self.store_settings,
                                self.resourcebox.set_disk_names)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
                                        self.folds, self.store_settings)
-        for page in (self.resourcebox, self.diskbox, self.settingsbox):
+        for page in (self.resourcebox, self.hardwarebox, self.diskbox, self.settingsbox):
             self.book.AddPage(page, '')
 
         self.titlebar = TitleBar(self, theme, self.on_menu, self.toggle_maximize)
@@ -168,7 +171,7 @@ class MainFrame(wx.Frame):
         self.book.SetBackgroundColour(wx.Colour(theme['bg']))
         self.titlebar.set_theme(theme)
         self.sidemenu.set_theme(theme)
-        for page in (self.resourcebox, self.diskbox, self.settingsbox):
+        for page in (self.resourcebox, self.hardwarebox, self.diskbox, self.settingsbox):
             page.apply_theme(theme)
         apply_titlebar_theme(self, theme)
         self.Refresh()
