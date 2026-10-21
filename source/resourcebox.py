@@ -28,6 +28,7 @@ from meters import ValueCard
 from meters import format_bytes
 from meters import format_rate
 from meters import get_ceiling
+from meters import get_watt_ceiling
 from utilities import call_painted
 
 
@@ -77,8 +78,13 @@ class ResourceBox(ScrollArea):
         self.layout_key = None
 
     def get_layout_key(self, data):
+        sensors = data['sensors']
+        monitor = sensors['monitor']
         return (len(data['gpus']), tuple(data['disks']), tuple(data['networks']),
-                data['wsl'] is not None, tuple(sorted(self.disk_names)))
+                data['wsl'] is not None, tuple(sorted(self.disk_names)),
+                tuple(sorted(sensors['nvme'])), tuple(sorted(sensors['cpu_power'])),
+                None if monitor is None else tuple((item['hardware'], item['name'])
+                                                   for item in monitor))
 
     def add_panel(self, key, title, body, subtitle=''):
         return Panel(self.content, self.theme, 'resources.' + key, title, body, self.folds,
@@ -109,6 +115,8 @@ class ResourceBox(ScrollArea):
                                   'Windows %s · build %s' % (release, version), socket.gethostname())
         cards['uptime'] = ValueCard(board, theme, 'Uptime')
         panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
+        panels.append(self.add_panel('sensors', 'Temperature and power',
+                                     self.build_sensors(data)))
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
                 graph('graph.cpu', 'CPU over time')]
@@ -165,6 +173,76 @@ class ResourceBox(ScrollArea):
         self.bind_children()
         self.apply_theme(theme)
         self.relayout_panels()
+
+    def build_sensors(self, data):
+        board, theme, cards = self.content, self.theme, self.cards
+        sensors = data['sensors']
+        body = []
+
+        def value(key, label, description=''):
+            cards[key] = ValueCard(board, theme, label, description)
+            body.append(cards[key])
+
+        if sensors['cpu_power']:
+            value('sensor.cpu', 'CPU power', 'Intel RAPL energy counter')
+        for gpu in data['gpus']:
+            value('sensor.gpu%d' % gpu['index'], 'GPU %d' % gpu['index'], gpu['name'])
+        for number in sorted(sensors['nvme']):
+            disk = self.disk_names.get('PhysicalDrive%d' % number) or {}
+            value('sensor.disk%d' % number, disk.get('name') or 'Disk %d' % number,
+                  'Disk %d · NVMe' % number)
+        monitor = sensors['monitor']
+        if monitor is None:
+            value('sensor.monitor', 'CPU and mainboard temperatures',
+                  'Windows has no reading without a sensor driver · '
+                  'shown here while LibreHardwareMonitor runs')
+        else:
+            for index, item in enumerate(monitor):
+                value('sensor.lhm%d' % index, item['name'], item['hardware'])
+        if sensors['cpu_power'] or any(gpu.get('power') for gpu in data['gpus']):
+            value('sensor.total', 'CPU and GPUs', 'Power drawn by the parts that report it')
+            cards['graph.power'] = GraphCard(board, theme, 'Power over time', HISTORY)
+            body.append(cards['graph.power'])
+        return body
+
+    def set_sensors(self, data):
+        cards, sensors = self.cards, data['sensors']
+        cpu = sensors['cpu_power']
+        if 'sensor.cpu' in cards:
+            parts = ['%s %.1f W' % (label, cpu[key]) for key, label in (
+                ('cores', 'Cores'), ('graphics', 'Graphics'), ('dram', 'Memory')) if key in cpu]
+            cards['sensor.cpu'].set_value('%.1f W' % cpu.get('package', 0),
+                                          ' · '.join(parts) or 'Intel RAPL energy counter')
+        gpu_watts = 0.0
+        for gpu in data['gpus']:
+            key = 'sensor.gpu%d' % gpu['index']
+            parts = []
+            if gpu.get('temp') is not None:
+                parts.append('%d °C' % gpu['temp'])
+            if gpu.get('power') is not None:
+                parts.append('%.0f W' % gpu['power'])
+                gpu_watts += gpu['power']
+            if key in cards:
+                cards[key].set_value(' · '.join(parts))
+        for number, temperature in sensors['nvme'].items():
+            if 'sensor.disk%d' % number in cards:
+                cards['sensor.disk%d' % number].set_value('%d °C' % temperature)
+        for index, item in enumerate(sensors['monitor'] or []):
+            if 'sensor.lhm%d' % index in cards:
+                unit = '%.0f °C' if item['type'] == 'Temperature' else '%.0f rpm'
+                cards['sensor.lhm%d' % index].set_value(unit % item['value'])
+        if 'sensor.total' in cards:
+            cpu_watts = cpu.get('package', 0.0)
+            cards['sensor.total'].set_value('%.0f W' % (cpu_watts + gpu_watts))
+            history = self.history
+            history['power.cpu'].append(cpu_watts)
+            history['power.gpu'].append(gpu_watts)
+            values = list(history['power.cpu']) + list(history['power.gpu'])
+            ceiling = get_watt_ceiling(max(values + [0]))
+            cards['graph.power'].set_series([
+                ('CPU', [value / ceiling for value in history['power.cpu']], 'area'),
+                ('GPUs', [value / ceiling for value in history['power.gpu']], 'line')],
+                self.get_span(), '%d W' % ceiling)
 
     def on_fold(self):
         self.relayout_panels()
@@ -225,6 +303,7 @@ class ResourceBox(ScrollArea):
         if wsl:
             self.set_wsl(wsl, cpu)
         self.set_history(data)
+        self.set_sensors(data)
 
     def get_public_text(self):
         if self.public_ip:

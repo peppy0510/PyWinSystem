@@ -16,6 +16,8 @@ import psutil
 
 import netinfo
 
+from sensors import Sensors
+
 
 WSL_PROCESS = 'vmmemwsl'
 WSL_CONFIG = os.path.join(os.path.expanduser('~'), '.wslconfig')
@@ -208,6 +210,7 @@ class Sampler:
         self.rates = Rates()
         self.gpus = Gpus()
         self.wsl = Wsl()
+        self.sensors = Sensors()
         psutil.cpu_percent(None, percpu=True)
 
     def sample(self):
@@ -239,5 +242,6 @@ class Sampler:
             data['networks'][name] = rate or (0, 0)
 
         data['addresses'] = netinfo.get_addresses()
+        data['sensors'] = self.sensors.sample()
         data['wsl'] = self.wsl.sample(now)
         return data

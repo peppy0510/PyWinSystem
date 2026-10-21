@@ -8,6 +8,8 @@
 * Disk list with media, bus, size and the health Windows reports, Storage Spaces drives included.
 * Disk health: NVMe temperature, life used, spare, power-on time, data written and read, unsafe shutdowns and media errors without administrator rights; SATA SMART attributes after Run as administrator. A hard disk that is asleep is left asleep unless you press Read anyway.
 * GPU power against its limit, fan, core and memory clocks, and system uptime.
+* Temperature and power panel: CPU package power from the Windows energy counter (Intel RAPL), GPU temperature and power, NVMe temperatures, a power graph, and CPU and mainboard temperatures and fans while LibreHardwareMonitor runs.
+* BIOS vendor, version and date, firmware type and Secure Boot state on the Hardware page.
 * Network adapters on the Hardware page, and a tray icon with Close to tray.
 * Only performance counters are sampled, so an idle hard disk is not woken; the disk list is read at start and on request.
 * Auto, dark and light themes.

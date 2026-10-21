@@ -53,6 +53,13 @@ def get_ceiling(value):
     return value
 
 
+def get_watt_ceiling(value):
+    for step in (25, 50, 100, 200, 300, 500, 750, 1000, 1500, 2000):
+        if (value or 0) <= step:
+            return step
+    return value
+
+
 def get_series_colour(theme, kind):
     return theme['accent'] if kind == 'area' else mix(theme['accent'], theme['text'], 0.55)
 
