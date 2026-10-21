@@ -19,7 +19,9 @@ from utilities import mix
 
 BAR_WIDTH = 150
 BAR_HEIGHT = 6
-VALUE_WIDTH = 46
+# every number on the right of a row uses this size
+VALUE_FONT = 8.5
+VALUE_WIDTH = 34
 VALUE_GAP = 10
 HIGH = 0.9
 
@@ -123,7 +125,7 @@ class ValueCard(ReadoutCard):
         right = width - self.PADDING
         if not self.value:
             return right
-        font = get_font(9.5, bold=True)
+        font = get_font(VALUE_FONT, bold=True)
         text_width = get_text_width(font, self.value)
         gc.SetFont(font, wx.Colour(self.theme['text']))
         gc.DrawText(self.value, right - text_width, (height - gc.GetTextExtent(self.value)[1]) / 2)
@@ -150,7 +152,7 @@ class MeterCard(ReadoutCard):
         value = None if self.value is None else max(0.0, min(1.0, self.value))
         high = value is not None and value >= HIGH
         ink = theme['warn'] if high else theme['text']
-        font = get_font(10, bold=True)
+        font = get_font(VALUE_FONT, bold=True)
         text = '—' if value is None else '%d%%' % round(value * 100)
         gc.SetFont(font, wx.Colour(ink))
         gc.DrawText(text, right - get_text_width(font, text), (height - gc.GetTextExtent(text)[1]) / 2)
@@ -212,7 +214,7 @@ class RateCard(ReadoutCard):
 
     def draw_control(self, gc, width, height):
         theme = self.theme
-        value_font, name_font = get_font(9.5, bold=True), get_font(8.5)
+        value_font, name_font = get_font(VALUE_FONT, bold=True), get_font(VALUE_FONT)
         column = get_text_width(value_font, self.WIDEST)
         values = ('—', '—') if self.pair is None else tuple(format_rate(value)
                                                             for value in self.pair)

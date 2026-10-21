@@ -15,6 +15,7 @@ import disks
 from controls import ActionCard
 from controls import Panel
 from controls import ScrollArea
+from meters import VALUE_FONT
 from meters import ReadoutCard
 from meters import format_bytes
 from utilities import call_painted
@@ -36,7 +37,7 @@ class DiskCard(ReadoutCard):
     def draw_control(self, gc, width, height):
         right = width - self.PADDING
         text = self.health or 'Pooled'
-        font = get_font(9.5, bold=True)
+        font = get_font(VALUE_FONT, bold=True)
         ink = self.theme['warn'] if self.health not in ('Healthy', None) else self.theme['text']
         gc.SetFont(font, wx.Colour(ink))
         text_width = get_text_width(font, text)
