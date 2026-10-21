@@ -8,6 +8,7 @@ email: peppy0510@hotmail.com
 
 
 import collections
+import re
 import wx
 
 from controls import CardBase
@@ -17,16 +18,23 @@ from utilities import get_font
 from utilities import get_text_width
 from utilities import mix
 
-BAR_WIDTH = 150
+# every readout row shares one grid: a picture slot, then a value column at the right edge
+SLOT_WIDTH = 200
+SLOT_GAP = 14
+VALUE_COLUMN = 104
+MIN_LABEL = 100
 # a quick answer would flip a busy caption on and off in a blink, so it waits this long
 BUSY_DELAY = 400
 BAR_HEIGHT = 6
 VALUE_FONT = 8.5
-VALUE_WIDTH = 34
-VALUE_GAP = 10
+# units sit left-aligned in a column of their own, so neither digits nor a unit change move them
+UNITS = ('%', '°C', 'W', 'B', 'KB', 'MB', 'GB', 'TB', 'B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s',
+         'bps', 'Kbps', 'Mbps', 'Gbps', 'h', 'rpm')
+UNIT_PATTERN = '|'.join(re.escape(unit) for unit in sorted(UNITS, key=len, reverse=True))
+MEASURE = re.compile(r'^([\d.,]+)\s*(%s)$' % UNIT_PATTERN)
+UNIT_GAP = 3
 HIGH = 0.9
 
-CORE_GAP = 4
 CORE_HEIGHT = 22
 
 
@@ -51,6 +59,11 @@ def get_ceiling(value):
         if value <= unit * step:
             return unit * step
     return value
+
+
+def get_unit_width():
+    font = get_font(VALUE_FONT, bold=True)
+    return max(get_text_width(font, unit) for unit in UNITS)
 
 
 def get_watt_ceiling(value):
@@ -118,6 +131,28 @@ class ReadoutCard(CardBase):
     def get_hit(self):
         return wx.Rect()
 
+    def get_grid(self, width):
+        right = width - self.PADDING
+        value_left = right - VALUE_COLUMN
+        slot_right = value_left - SLOT_GAP
+        slot_left = max(self.PADDING + MIN_LABEL, slot_right - SLOT_WIDTH)
+        return slot_left, slot_right, value_left, right
+
+    def draw_value(self, gc, text, right, middle, ink='text', bold=True):
+        font = get_font(VALUE_FONT, bold=bold)
+        gc.SetFont(font, wx.Colour(self.theme[ink]))
+        top = middle - gc.GetTextExtent(text or '0')[1] / 2
+        found = MEASURE.match(text)
+        if not found:
+            gc.DrawText(text, right - get_text_width(font, text), top)
+            return get_text_width(font, text)
+        number, unit = found.groups()
+        unit_left = right - get_unit_width()
+        gc.DrawText(unit, unit_left, top)
+        number_right = unit_left - UNIT_GAP
+        gc.DrawText(number, number_right - get_text_width(font, number), top)
+        return right - number_right + get_text_width(font, number)
+
 
 class ValueCard(ReadoutCard):
 
@@ -138,11 +173,9 @@ class ValueCard(ReadoutCard):
         right = width - self.PADDING
         if not self.value:
             return right
-        font = get_font(VALUE_FONT, bold=True)
-        text_width = get_text_width(font, self.value)
-        gc.SetFont(font, wx.Colour(self.theme['warn' if self.warn else 'text']))
-        gc.DrawText(self.value, right - text_width, (height - gc.GetTextExtent(self.value)[1]) / 2)
-        return right - text_width
+        drawn = self.draw_value(gc, self.value, right, height / 2, 'warn' if self.warn else 'text')
+        # no picture here, so a long label may run into the empty slot
+        return right - drawn
 
 
 class MeterCard(ReadoutCard):
@@ -161,19 +194,12 @@ class MeterCard(ReadoutCard):
 
     def draw_control(self, gc, width, height):
         theme = self.theme
-        right = width - self.PADDING
+        left, slot_right, _, right = self.get_grid(width)
         value = None if self.value is None else max(0.0, min(1.0, self.value))
         high = value is not None and value >= HIGH
-        ink = theme['warn'] if high else theme['text']
-        font = get_font(VALUE_FONT, bold=True)
-        text = '—' if value is None else '%d%%' % round(value * 100)
-        gc.SetFont(font, wx.Colour(ink))
-        gc.DrawText(text, right - get_text_width(font, text),
-                    (height - gc.GetTextExtent(text)[1]) / 2)
-
-        bar_right = right - VALUE_WIDTH - VALUE_GAP
-        bar_width = min(BAR_WIDTH, max(40, bar_right - self.PADDING - 120))
-        left = bar_right - bar_width
+        self.draw_value(gc, '—' if value is None else '%d%%' % round(value * 100), right,
+                        height / 2, 'warn' if high else 'text')
+        bar_width = slot_right - left
         top = (height - BAR_HEIGHT) / 2
         fill_rect(gc, theme['track'], left, top, bar_width, BAR_HEIGHT, BAR_HEIGHT / 2)
         if value:
@@ -187,15 +213,9 @@ class MeterCard(ReadoutCard):
 
 
 class RateCard(ReadoutCard):
-    # two rates in fixed columns, so changing digits never move the label's room
 
-    NAME_GAP = 5
-    PAIR_GAP = 16
-    WIDEST = '999.9 MB/s'
-    SPARK_WIDTH = 96
     SPARK_HEIGHT = 26
-    SPARK_GAP = 14
-    LABEL_ROOM = 110
+    LINE_GAP = 8
 
     def __init__(self, parent, theme, label, description='', names=('R', 'W'), capacity=300):
         super().__init__(parent, theme, label, description)
@@ -211,40 +231,30 @@ class RateCard(ReadoutCard):
             values.append(value)
         self.Refresh()
 
-    def draw_spark(self, gc, right, height):
-        left = right - self.SPARK_WIDTH
-        if left - self.PADDING < self.LABEL_ROOM:
-            return right
+    def draw_control(self, gc, width, height):
+        theme = self.theme
+        left, slot_right, value_left, right = self.get_grid(width)
+        # the two rates stack in the value column; the names keep a fixed left edge
+        values = ('—', '—') if self.pair is None else tuple(format_rate(value)
+                                                            for value in self.pair)
+        for index, middle in enumerate((height / 2 - self.LINE_GAP,
+                                        height / 2 + self.LINE_GAP)):
+            name_font = get_font(VALUE_FONT)
+            gc.SetFont(name_font, wx.Colour(theme['dim']))
+            gc.DrawText(self.names[index], value_left,
+                        middle - gc.GetTextExtent(self.names[index])[1] / 2)
+            self.draw_value(gc, values[index], right, middle)
+
         top = (height - self.SPARK_HEIGHT) / 2
-        fill_rect(gc, self.theme['rim'], left, top + self.SPARK_HEIGHT, self.SPARK_WIDTH, 1)
+        spark_width = slot_right - left
+        fill_rect(gc, theme['rim'], left, top + self.SPARK_HEIGHT, spark_width, 1)
         peaks = [value for values in self.history for value in values if value]
         ceiling = get_ceiling(max(peaks)) if peaks else 1.0
         for values, kind in zip(self.history, ('area', 'line')):
-            draw_series(gc, self.theme, [None if value is None else value / ceiling
-                                         for value in values], kind,
-                        (left, top, self.SPARK_WIDTH, self.SPARK_HEIGHT), self.capacity, 1.2)
+            draw_series(gc, theme, [None if value is None else value / ceiling
+                                    for value in values], kind,
+                        (left, top, spark_width, self.SPARK_HEIGHT), self.capacity, 1.2)
         return left
-
-    def draw_control(self, gc, width, height):
-        theme = self.theme
-        value_font, name_font = get_font(VALUE_FONT, bold=True), get_font(VALUE_FONT)
-        column = get_text_width(value_font, self.WIDEST)
-        values = ('—', '—') if self.pair is None else tuple(format_rate(value)
-                                                            for value in self.pair)
-        x = width - self.PADDING
-        for index in (1, 0):
-            text = values[index]
-            gc.SetFont(value_font, wx.Colour(theme['text']))
-            gc.DrawText(text, x - get_text_width(value_font, text),
-                        (height - gc.GetTextExtent(text)[1]) / 2)
-            x -= column + self.NAME_GAP
-            name = self.names[index]
-            gc.SetFont(name_font, wx.Colour(theme['dim']))
-            x -= get_text_width(name_font, name)
-            gc.DrawText(name, x, (height - gc.GetTextExtent(name)[1]) / 2)
-            if index:
-                x -= self.PAIR_GAP
-        return self.draw_spark(gc, x - self.SPARK_GAP, height)
 
 
 class CoreCard(ReadoutCard):
@@ -262,16 +272,15 @@ class CoreCard(ReadoutCard):
     def draw_control(self, gc, width, height):
         theme = self.theme
         count = len(self.values)
-        right = width - self.PADDING
+        left, slot_right, _, right = self.get_grid(width)
         if not count:
-            return right
-        # the same thickness and round ends as the horizontal meter bars
+            return left
+        # the same thickness and round ends as the horizontal meter bars, spread over the slot
         column, radius = BAR_HEIGHT, BAR_HEIGHT / 2
-        gap = max(1, min(CORE_GAP, (right - self.PADDING - 140) // count - column))
-        left = right - count * (column + gap) + gap
+        step = (slot_right - left - column) / float(max(1, count - 1))
         top = (height - CORE_HEIGHT) / 2
         for index, value in enumerate(self.values):
-            x = left + index * (column + gap)
+            x = left + index * step
             fill_rect(gc, theme['track'], x, top, column, CORE_HEIGHT, radius)
             if value > 0:
                 level = max(column, CORE_HEIGHT * min(100, value) / 100.0)
@@ -280,10 +289,8 @@ class CoreCard(ReadoutCard):
         return left
 
 
-GRAPH_HEIGHT = 112
-GRAPH_TOP = 30
-GRAPH_BOTTOM = 10
-LEGEND_GAP = 14
+GRAPH_HEIGHT = 100
+GRAPH_PAD = 12
 LEGEND_SWATCH = 12
 
 
@@ -307,28 +314,26 @@ class GraphCard(ReadoutCard):
     def draw(self, gc, width, height):
         theme = self.theme
         draw_row_face(gc, theme, width, height, self.first, self.last)
-        font = get_font(9)
-        gc.SetFont(font, wx.Colour(theme['text']))
-        gc.DrawText(self.label, self.PADDING, 9)
+        left, _, _, right = self.get_grid(width)
+        gc.SetFont(get_font(10), wx.Colour(theme['text']))
+        gc.DrawText(self.fit_text(gc, self.label, left - self.PADDING - self.LABEL_GAP),
+                    self.PADDING, GRAPH_PAD)
 
-        right = width - self.PADDING
-        gc.SetFont(get_font(8), wx.Colour(theme['dim']))
-        span_width = get_text_width(get_font(8), self.span)
-        gc.DrawText(self.span, right - span_width, 10)
-        x = right - span_width - LEGEND_GAP
-        for name, _, kind in reversed(self.series):
-            text_width = get_text_width(get_font(8), name)
-            x -= text_width
-            gc.DrawText(name, x, 10)
-            x -= 5 + LEGEND_SWATCH
+        note = get_font(8)
+        gc.SetFont(note, wx.Colour(theme['dim']))
+        y = GRAPH_PAD + 22
+        for name, _, kind in self.series:
+            colour = get_series_colour(theme, kind)
             if kind == 'area':
-                fill_rect(gc, get_series_colour(theme, kind), x, 13, LEGEND_SWATCH, 7, 1)
+                fill_rect(gc, colour, self.PADDING, y + 4, LEGEND_SWATCH, 7, 1)
             else:
-                fill_rect(gc, get_series_colour(theme, kind), x, 16, LEGEND_SWATCH, 2)
-            x -= LEGEND_GAP
+                fill_rect(gc, colour, self.PADDING, y + 7, LEGEND_SWATCH, 2)
+            gc.DrawText(name, self.PADDING + LEGEND_SWATCH + 6, y)
+            y += 16
+        gc.DrawText(self.span, self.PADDING, height - GRAPH_PAD - 12)
 
-        left, top = self.PADDING, GRAPH_TOP
-        plot_width, plot_height = right - left, height - GRAPH_TOP - GRAPH_BOTTOM
+        top = GRAPH_PAD
+        plot_width, plot_height = right - left, height - GRAPH_PAD * 2
         for level in (0.0, 0.5, 1.0):
             fill_rect(gc, theme['rim'], left, top + plot_height * (1 - level), plot_width, 1)
         if self.scale:

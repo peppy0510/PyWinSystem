@@ -186,7 +186,7 @@ class ResourceBox(ScrollArea):
         if sensors['cpu_power']:
             value('sensor.cpu', 'CPU power', 'Intel RAPL energy counter')
         for gpu in data['gpus']:
-            value('sensor.gpu%d' % gpu['index'], 'GPU %d' % gpu['index'], gpu['name'])
+            value('sensor.gpu%d' % gpu['index'], 'GPU %d' % gpu['index'])
         for number in sorted(sensors['nvme']):
             disk = self.disk_names.get('PhysicalDrive%d' % number) or {}
             value('sensor.disk%d' % number, disk.get('name') or 'Disk %d' % number,
@@ -216,14 +216,13 @@ class ResourceBox(ScrollArea):
         gpu_watts = 0.0
         for gpu in data['gpus']:
             key = 'sensor.gpu%d' % gpu['index']
-            parts = []
-            if gpu.get('temp') is not None:
-                parts.append('%d °C' % gpu['temp'])
+            parts = [gpu['name']]
             if gpu.get('power') is not None:
                 parts.append('%.0f W' % gpu['power'])
                 gpu_watts += gpu['power']
             if key in cards:
-                cards[key].set_value(' · '.join(parts))
+                cards[key].set_value('' if gpu.get('temp') is None else '%d °C' % gpu['temp'],
+                                     ' · '.join(parts))
         for number, temperature in sensors['nvme'].items():
             if 'sensor.disk%d' % number in cards:
                 cards['sensor.disk%d' % number].set_value('%d °C' % temperature)
