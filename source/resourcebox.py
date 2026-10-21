@@ -8,6 +8,8 @@ email: peppy0510@hotmail.com
 
 
 import collections
+import platform
+import socket
 import threading
 import time
 
@@ -100,8 +102,11 @@ class ResourceBox(ScrollArea):
             cards[key] = RateCard(board, theme, label, description, names, ROW_HISTORY)
             return cards[key]
 
+        release, version = platform.release(), platform.version()
+        cards['host'] = ValueCard(board, theme, 'Hostname',
+                                  'Windows %s · build %s' % (release, version), socket.gethostname())
         cards['uptime'] = ValueCard(board, theme, 'Uptime')
-        panels.append(self.add_panel('system', 'System', [cards['uptime']]))
+        panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
                 graph('graph.cpu', 'CPU over time')]
