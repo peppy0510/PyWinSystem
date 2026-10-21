@@ -240,6 +240,7 @@ class MainFrame(wx.Frame):
         elif not values['tray_icon'] and self.tray is not None:
             self.remove_tray()
         self.resourcebox.set_interval(values['interval'])
+        self.resourcebox.set_electricity(values)
         self.store_settings()
 
     def remove_tray(self):
@@ -283,6 +284,7 @@ class MainFrame(wx.Frame):
         save_settings(settings)
 
     def on_close(self, event):
+        self.resourcebox.energy.save()
         values = self.settingsbox.get_values()
         if (self.tray is not None and values['close_to_tray'] and not self.quitting
                 and event.CanVeto()):

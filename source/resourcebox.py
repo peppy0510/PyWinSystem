@@ -8,12 +8,14 @@ email: peppy0510@hotmail.com
 
 
 import collections
+import os
 import platform
 import socket
 import threading
 import time
 import wx
 
+import energy
 import netinfo
 
 from controls import ActionCard
@@ -54,6 +56,10 @@ def get_power_text(gpu):
     return ' · '.join(parts)
 
 
+def format_percent(value):
+    return '—' if value is None else '%d%%' % round(value * 100)
+
+
 def get_ratio(used, total):
     return used / float(total) if total else None
 
@@ -69,6 +75,11 @@ class ResourceBox(ScrollArea):
         self.disk_names = {}
         self.history = collections.defaultdict(lambda: collections.deque(maxlen=HISTORY))
         self.interval = 1.0
+        self.energy = energy.EnergyLog()
+        self.electricity = {}
+        self.tariffs = energy.load_tariffs()
+        self.tariff_time = self.get_tariff_time()
+        self.sampled = None
         self.public_ip = None
         self.looking_up = False
         self.apply_theme(theme)
@@ -117,6 +128,12 @@ class ResourceBox(ScrollArea):
         panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
         panels.append(self.add_panel('sensors', 'Temperature and power',
                                      self.build_sensors(data)))
+        if 'sensor.total' in cards:
+            for key, label in (('cost.wall', 'Wall power'), ('cost.rate', 'At this rate'),
+                               ('cost.today', 'Today'), ('cost.month', 'This month')):
+                cards[key] = ValueCard(board, theme, label)
+            panels.append(self.add_panel('electricity', 'Electricity', [
+                cards[key] for key in ('cost.wall', 'cost.rate', 'cost.today', 'cost.month')]))
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
                 graph('graph.cpu', 'CPU over time')]
@@ -239,9 +256,66 @@ class ResourceBox(ScrollArea):
             values = list(history['power.cpu']) + list(history['power.gpu'])
             ceiling = get_watt_ceiling(max(values + [0]))
             cards['graph.power'].set_series([
-                ('CPU', [value / ceiling for value in history['power.cpu']], 'area'),
-                ('GPUs', [value / ceiling for value in history['power.gpu']], 'line')],
+                ('CPU', [value / ceiling for value in history['power.cpu']], 'area',
+                 '%.0f W' % cpu_watts),
+                ('GPUs', [value / ceiling for value in history['power.gpu']], 'line',
+                 '%.0f W' % gpu_watts)],
                 self.get_span(), '%d W' % ceiling)
+
+    def set_electricity(self, values):
+        self.electricity = values
+
+    def get_tariff_time(self):
+        try:
+            return os.path.getmtime(energy.TARIFF_PATH)
+        except OSError:
+            return None
+
+    def get_tariff(self):
+        # a saved edit to tariffs.json applies without a restart
+        changed = self.get_tariff_time()
+        if changed != self.tariff_time:
+            self.tariff_time = changed
+            self.tariffs = energy.load_tariffs()
+        plan = self.electricity.get('plan', 'kr_home')
+        return self.tariffs.get(plan) or self.tariffs['kr_home']
+
+    def set_cost(self, data):
+        cards = self.cards
+        now = time.monotonic()
+        seconds = 0 if self.sampled is None else min(now - self.sampled, 60)
+        self.sampled = now
+        if 'cost.wall' not in cards:
+            return
+        parts = data['sensors']['cpu_power'].get('package', 0.0) + sum(
+            gpu.get('power') or 0.0 for gpu in data['gpus'])
+        other = float(self.electricity.get('other_watts', 40))
+        efficiency = max(1.0, float(self.electricity.get('psu_efficiency', 90)))
+        wall = (parts + other) * 100.0 / efficiency
+        self.energy.add(wall, seconds)
+
+        tariff, month = self.get_tariff(), time.localtime().tm_mon
+        household = float(self.electricity.get('household_kwh', 250))
+        currency = tariff.get('currency', 'KRW')
+
+        def money(value):
+            return energy.format_money(value, currency)
+
+        monthly = wall / 1000.0 * 24 * energy.DAYS_PER_MONTH
+        month_cost = energy.get_share(monthly, household, tariff, month)
+        cards['cost.wall'].set_value('%.0f W' % wall, 'CPU and GPUs %.0f W + other %.0f W, '
+                                     'at %.0f%% efficiency' % (parts, other, efficiency))
+        cards['cost.rate'].set_value(money(month_cost / (24 * energy.DAYS_PER_MONTH)) + ' / h',
+                                     'Day %s · month %s · %s' % (
+                                         money(month_cost / energy.DAYS_PER_MONTH),
+                                         money(month_cost), tariff.get('name', '')))
+        used_month, used_today = self.energy.get_month(), self.energy.get_today()
+        spent = energy.get_share(used_month, household, tariff, month)
+        price = spent / used_month if used_month else 0.0
+        cards['cost.today'].set_value(money(used_today * price),
+                                      '%.2f kWh counted while this app ran' % used_today)
+        cards['cost.month'].set_value(money(spent), '%.1f kWh counted while this app ran'
+                                      % used_month)
 
     def on_fold(self):
         self.relayout_panels()
@@ -303,6 +377,7 @@ class ResourceBox(ScrollArea):
             self.set_wsl(wsl, cpu)
         self.set_history(data)
         self.set_sensors(data)
+        self.set_cost(data)
 
     def get_public_text(self):
         if self.public_ip:
@@ -371,19 +446,24 @@ class ResourceBox(ScrollArea):
             incoming, outgoing = list(history[key + '.in']), list(history[key + '.out'])
             ceiling = get_ceiling(max(incoming + outgoing + [0]))
             cards['graph.' + key].set_series([
-                (names[0], [value / ceiling for value in incoming], 'area'),
-                (names[1], [value / ceiling for value in outgoing], 'line')],
+                (names[0], [value / ceiling for value in incoming], 'area',
+                 format_rate(incoming[-1])),
+                (names[1], [value / ceiling for value in outgoing], 'line',
+                 format_rate(outgoing[-1]))],
                 span, format_rate(ceiling))
         for key, name in (('cpu', 'CPU'), ('memory', 'Memory')):
-            series = [(name, list(history[key]), 'area')]
+            series = [(name, list(history[key]), 'area', format_percent(history[key][-1]))]
             if any(value is not None for value in history[key + '.wsl']):
-                series.append(('WSL', list(history[key + '.wsl']), 'line'))
+                series.append(('WSL', list(history[key + '.wsl']), 'line',
+                               format_percent(history[key + '.wsl'][-1])))
             cards['graph.' + key].set_series(series, span)
         for gpu in data['gpus']:
             index = gpu['index']
             cards['graph.gpu%d' % index].set_series([
-                ('GPU', list(history['gpu%d' % index]), 'area'),
-                ('VRAM', list(history['vram%d' % index]), 'line')], span)
+                ('GPU', list(history['gpu%d' % index]), 'area',
+                 format_percent(history['gpu%d' % index][-1])),
+                ('VRAM', list(history['vram%d' % index]), 'line',
+                 format_percent(history['vram%d' % index][-1]))], span)
 
     def set_wsl(self, wsl, cpu):
         cards, config = self.cards, wsl['config']

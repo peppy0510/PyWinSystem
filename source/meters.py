@@ -291,7 +291,8 @@ class CoreCard(ReadoutCard):
 
 GRAPH_HEIGHT = 100
 GRAPH_PAD = 12
-LEGEND_SWATCH = 12
+LEGEND_SWATCH = 10
+LEGEND_LINE = 18
 
 
 class GraphCard(ReadoutCard):
@@ -305,7 +306,7 @@ class GraphCard(ReadoutCard):
         self.scale = ''
 
     def set_series(self, series, span, scale=''):
-        # series: [(name, values 0..1 or None, 'area' or 'line')]
+        # series: [(name, values 0..1 or None, 'area' or 'line', latest value as text)]
         self.series = series
         self.span = span
         self.scale = scale
@@ -314,31 +315,32 @@ class GraphCard(ReadoutCard):
     def draw(self, gc, width, height):
         theme = self.theme
         draw_row_face(gc, theme, width, height, self.first, self.last)
-        left, _, _, right = self.get_grid(width)
-        gc.SetFont(get_font(10), wx.Colour(theme['text']))
-        gc.DrawText(self.fit_text(gc, self.label, left - self.PADDING - self.LABEL_GAP),
-                    self.PADDING, GRAPH_PAD)
+        left, slot_right, value_left, right = self.get_grid(width)
+        self.draw_label(gc, height, left - self.PADDING - self.LABEL_GAP)
 
-        note = get_font(8)
-        gc.SetFont(note, wx.Colour(theme['dim']))
-        y = GRAPH_PAD + 22
-        for name, _, kind in self.series:
+        # the legend doubles as the readout, in the value column like every other row
+        middle = height / 2 - (len(self.series) - 1) * LEGEND_LINE / 2
+        note = get_font(VALUE_FONT)
+        for index, (name, _, kind, text) in enumerate(self.series):
+            y = middle + index * LEGEND_LINE
             colour = get_series_colour(theme, kind)
             if kind == 'area':
-                fill_rect(gc, colour, self.PADDING, y + 4, LEGEND_SWATCH, 7, 1)
+                fill_rect(gc, colour, value_left, y - 3, LEGEND_SWATCH, 7, 1)
             else:
-                fill_rect(gc, colour, self.PADDING, y + 7, LEGEND_SWATCH, 2)
-            gc.DrawText(name, self.PADDING + LEGEND_SWATCH + 6, y)
-            y += 16
-        gc.DrawText(self.span, self.PADDING, height - GRAPH_PAD - 12)
+                fill_rect(gc, colour, value_left, y - 1, LEGEND_SWATCH, 2)
+            gc.SetFont(note, wx.Colour(theme['dim']))
+            gc.DrawText(name, value_left + LEGEND_SWATCH + 5, y - gc.GetTextExtent(name)[1] / 2)
+            self.draw_value(gc, text, right, y)
 
         top = GRAPH_PAD
-        plot_width, plot_height = right - left, height - GRAPH_PAD * 2
+        plot_width, plot_height = slot_right - left, height - GRAPH_PAD * 2
         for level in (0.0, 0.5, 1.0):
             fill_rect(gc, theme['rim'], left, top + plot_height * (1 - level), plot_width, 1)
+        gc.SetFont(get_font(7.5), wx.Colour(theme['dim']))
         if self.scale:
-            gc.SetFont(get_font(7.5), wx.Colour(theme['dim']))
             gc.DrawText(self.scale, left + 2, top + 2)
-        for _, values, kind in self.series:
+        span_width = get_text_width(get_font(7.5), self.span)
+        gc.DrawText(self.span, slot_right - span_width - 2, top + 2)
+        for _, values, kind, _ in self.series:
             draw_series(gc, theme, values, kind, (left, top, plot_width, plot_height),
                         self.capacity)
