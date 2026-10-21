@@ -19,6 +19,7 @@ from controls import ActionCard
 from controls import Panel
 from controls import ScrollArea
 from meters import VALUE_FONT
+from meters import BUSY_DELAY
 from meters import ReadoutCard
 from meters import ValueCard
 from meters import format_bytes
@@ -75,7 +76,7 @@ class DiskBox(ScrollArea):
         if self.reading:
             return
         self.reading = True
-        self.refresh.set_caption('Reading')
+        wx.CallLater(BUSY_DELAY, self.show_busy)
 
         def work():
             try:
@@ -96,6 +97,10 @@ class DiskBox(ScrollArea):
                 healths[disk['number']] = health
             call_painted(self, self.set_disks, found, healths)
         threading.Thread(target=work, daemon=True).start()
+
+    def show_busy(self):
+        if self and self.reading:
+            self.refresh.set_caption('Reading')
 
     def set_disks(self, found, healths):
         if not self:

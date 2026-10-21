@@ -18,6 +18,8 @@ from utilities import get_text_width
 from utilities import mix
 
 BAR_WIDTH = 150
+# a quick answer would flip a busy caption on and off in a blink, so it waits this long
+BUSY_DELAY = 400
 BAR_HEIGHT = 6
 VALUE_FONT = 8.5
 VALUE_WIDTH = 34

@@ -12,6 +12,7 @@ import platform
 import socket
 import threading
 import time
+import wx
 
 import netinfo
 
@@ -21,6 +22,7 @@ from controls import ScrollArea
 from meters import CoreCard
 from meters import GraphCard
 from meters import MeterCard
+from meters import BUSY_DELAY
 from meters import RateCard
 from meters import ValueCard
 from meters import format_bytes
@@ -233,7 +235,7 @@ class ResourceBox(ScrollArea):
         if self.looking_up:
             return
         self.looking_up = True
-        self.cards['public'].set_caption('Looking up')
+        wx.CallLater(BUSY_DELAY, self.show_busy)
 
         def work():
             try:
@@ -242,6 +244,11 @@ class ResourceBox(ScrollArea):
                 address = None
             call_painted(self, self.set_public_ip, address)
         threading.Thread(target=work, daemon=True).start()
+
+    def show_busy(self):
+        card = self.cards.get('public') if self else None
+        if card and self.looking_up:
+            card.set_caption('Looking up')
 
     def set_public_ip(self, address):
         if not self:
