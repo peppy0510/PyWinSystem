@@ -1,0 +1,5 @@
+nvidia-ml-py
+pillow
+psutil
+pywin32
+wxpython
