@@ -8,8 +8,8 @@ email: peppy0510@hotmail.com
 
 
 import collections
-
 import threading
+import time
 
 import netinfo
 
@@ -20,6 +20,7 @@ from meters import CoreCard
 from meters import GraphCard
 from meters import MeterCard
 from meters import RateCard
+from meters import ValueCard
 from meters import format_bytes
 from meters import format_rate
 from meters import get_ceiling
@@ -29,6 +30,22 @@ from utilities import call_painted
 HISTORY = 300
 # a row graph is only about 100 px wide, so it shows the last minute
 ROW_HISTORY = 60
+
+
+def format_uptime(seconds):
+    minutes = int(seconds) // 60
+    days, minutes = divmod(minutes, 1440)
+    hours, minutes = divmod(minutes, 60)
+    return '%dd %dh %dm' % (days, hours, minutes) if days else '%dh %dm' % (hours, minutes)
+
+
+def get_power_text(gpu):
+    parts = ['%.0f W of %.0f W' % (gpu['power'], gpu['power_limit'] or 0)]
+    if gpu.get('fan') is not None:
+        parts.append('fan %d%%' % gpu['fan'])
+    if gpu.get('core_clock') and gpu.get('memory_clock'):
+        parts.append('%d / %d MHz' % (gpu['core_clock'], gpu['memory_clock']))
+    return ' · '.join(parts)
 
 
 def get_ratio(used, total):
@@ -82,6 +99,9 @@ class ResourceBox(ScrollArea):
             cards[key] = RateCard(board, theme, label, description, names, ROW_HISTORY)
             return cards[key]
 
+        cards['uptime'] = ValueCard(board, theme, 'Uptime')
+        panels.append(self.add_panel('system', 'System', [cards['uptime']]))
+
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
                 graph('graph.cpu', 'CPU over time')]
         cards['cores'] = CoreCard(board, theme, 'Per processor')
@@ -100,6 +120,8 @@ class ResourceBox(ScrollArea):
         for gpu in data['gpus']:
             body.append(meter('gpu%d' % gpu['index'], 'GPU %d' % gpu['index'], gpu['name']))
             body.append(meter('vram%d' % gpu['index'], 'VRAM %d' % gpu['index']))
+            if gpu.get('power') is not None:
+                body.append(meter('power%d' % gpu['index'], 'Power %d' % gpu['index']))
             body.append(graph('graph.gpu%d' % gpu['index'], 'GPU %d over time' % gpu['index']))
         if body:
             panels.append(self.add_panel('gpu', 'GPU', body,
@@ -157,6 +179,10 @@ class ResourceBox(ScrollArea):
             self.build(data)
         cards, wsl = self.cards, data['wsl']
 
+        seconds = time.time() - data['boot']
+        cards['uptime'].set_value(format_uptime(seconds), 'Since %s' % time.strftime(
+            '%Y-%m-%d %H:%M', time.localtime(data['boot'])))
+
         cpu = data['cpu']
         cards['cpu'].set_value(cpu['total'] / 100.0,
                                share=wsl and wsl.get('host_cpu', 0) / 100.0)
@@ -177,6 +203,9 @@ class ResourceBox(ScrollArea):
                 part for part in (gpu['name'], temp) if part))
             cards['vram%d' % index].set_value(get_ratio(gpu['used'], gpu['total']), '%s of %s' % (
                 format_bytes(gpu['used']), format_bytes(gpu['total'])))
+            if 'power%d' % index in cards:
+                cards['power%d' % index].set_value(get_ratio(gpu['power'], gpu['power_limit']),
+                                                   get_power_text(gpu))
 
         for name, pair in data['disks'].items():
             cards['disk:' + name].set_rates(pair)

@@ -102,10 +102,20 @@ class Gpus:
                        'used': memory.used, 'total': memory.total}
             except Exception:
                 continue
-            try:
-                gpu['temp'] = nvml.nvmlDeviceGetTemperature(handle, nvml.NVML_TEMPERATURE_GPU)
-            except Exception:
-                gpu['temp'] = None
+            for key, read in (
+                    ('temp', lambda: nvml.nvmlDeviceGetTemperature(handle,
+                                                                   nvml.NVML_TEMPERATURE_GPU)),
+                    ('power', lambda: nvml.nvmlDeviceGetPowerUsage(handle) / 1000.0),
+                    ('power_limit', lambda: nvml.nvmlDeviceGetEnforcedPowerLimit(handle) / 1000.0),
+                    ('fan', lambda: nvml.nvmlDeviceGetFanSpeed(handle)),
+                    ('core_clock', lambda: nvml.nvmlDeviceGetClockInfo(handle,
+                                                                       nvml.NVML_CLOCK_GRAPHICS)),
+                    ('memory_clock', lambda: nvml.nvmlDeviceGetClockInfo(handle,
+                                                                         nvml.NVML_CLOCK_MEM))):
+                try:
+                    gpu[key] = read()
+                except Exception:
+                    gpu[key] = None
             gpus.append(gpu)
         return gpus
 
@@ -206,6 +216,7 @@ class Sampler:
         memory = psutil.virtual_memory()
         swap = psutil.swap_memory()
         data = {
+            'boot': psutil.boot_time(),
             'cpu': {'total': sum(cores) / max(1, len(cores)), 'cores': cores},
             'memory': {'total': memory.total, 'used': memory.total - memory.available,
                        'available': memory.available},
