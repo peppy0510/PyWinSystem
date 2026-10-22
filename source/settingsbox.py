@@ -45,7 +45,7 @@ class SettingsBox(ScrollArea):
         self.plan = ChoiceCard(board, theme, 'Plan', 'Prices come from tariffs.json',
                                PLANS, on_change)
         self.household = SliderCard(board, theme, 'Rest of the home',
-                                    'kWh a month without this PC, for stepped prices',
+                                    'kWh a month without this device, for stepped prices',
                                     (0, 2000, 10, 0), on_change, default=250)
         self.other = SliderCard(board, theme, 'Rest of the case',
                                 'Mainboard, memory, fans and cards no counter reports',
