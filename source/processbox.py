@@ -62,6 +62,8 @@ CPU_WIDTH = 52
 MEMORY_WIDTH = 76
 COLUMN_GAP = 12
 LABEL_WIDTH = 96
+VALUE_LEFT = NAME_LEFT + LABEL_WIDTH
+SELECTION_ALPHA = 90
 LINE_HEIGHT = 18
 DETAIL_TOP = 2
 DETAIL_GAP = 8
@@ -145,6 +147,10 @@ class ProcessList(Canvas):
         self.hints = {}
         self.services = {}
         self.expanded = set()
+        self.selection = None
+        self.selecting = False
+        self.stale = False
+        self.positions = {}
         self.details = {}
         self.copied = None
         self.offset = 0
@@ -170,7 +176,9 @@ class ProcessList(Canvas):
         self.Bind(wx.EVT_LEAVE_WINDOW, self.on_leave)
         self.Bind(wx.EVT_MOUSE_CAPTURE_LOST, self.on_lost)
         self.Bind(wx.EVT_MOUSEWHEEL, self.on_wheel)
+        self.Bind(wx.EVT_RIGHT_UP, self.on_right_up)
         self.Bind(wx.EVT_CHAR, self.on_char)
+        self.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
         self.Bind(wx.EVT_SIZE, self.on_size)
 
     def read_now(self):
@@ -208,7 +216,11 @@ class ProcessList(Canvas):
         self.expanded &= set(times)
         self.folded &= set(times)
         self.details = {key: value for key, value in self.details.items() if key in times}
-        self.relayout()
+        # rows that move under a dragging selection would drag it along
+        if self.selecting:
+            self.stale = True
+        else:
+            self.relayout()
 
     def get_parent(self, row):
         # a reused PID can point at a younger process that is not the parent
@@ -358,6 +370,10 @@ class ProcessList(Canvas):
             top += height
         self.items, self.extent = items, top
         self.tops = [item[0] for item in items]
+        self.positions = {item[2]['key']: index for index, item in enumerate(items)}
+        if self.selection and (self.selection[0] not in self.positions
+                               or self.items[self.positions[self.selection[0]]][3] is None):
+            self.selection = None
         self.scroll_to(self.offset)
         self.Refresh()
 
@@ -374,10 +390,11 @@ class ProcessList(Canvas):
             return self.wraps[key]
         gc = self.get_measure()
         fits = lambda part: gc.GetTextExtent(part)[0] <= limit
-        lines, rest = [], text
+        # each line keeps where it starts in the text, so a selection copies the original
+        lines, rest, start = [], text, 0
         while rest and len(lines) < most:
             if fits(rest):
-                lines.append(rest)
+                lines.append((rest, start, len(rest), False))
                 rest = ''
                 break
             low, high = 1, len(rest)
@@ -391,16 +408,19 @@ class ProcessList(Canvas):
             cut = max(rest.rfind(mark, 0, low) for mark in (' ', '\\', '/'))
             if cut >= low // 2:
                 low = cut + 1
-            lines.append(rest[:low].rstrip())
-            rest = rest[low:].lstrip(' ')
+            shown = rest[:low].rstrip()
+            lines.append((shown, start, len(shown), False))
+            taken = rest[low:]
+            rest = taken.lstrip(' ')
+            start += low + len(taken) - len(rest)
         if rest and lines:
-            last = lines[-1]
+            last, begin = lines[-1][:2]
             while last and not fits(last + '…'):
                 last = last[:-1]
-            lines[-1] = last + '…'
+            lines[-1] = (last + '…', begin, len(last), True)
         if len(self.wraps) > 2000:
             self.wraps.clear()
-        self.wraps[key] = lines or ['']
+        self.wraps[key] = lines or [('', 0, 0, False)]
         return self.wraps[key]
 
     def get_parent_text(self, row):
@@ -435,9 +455,13 @@ class ProcessList(Canvas):
         if row['name'].lower() == CONSOLE_HOST and parent is not None:
             fields.insert(2, ('Console of', describe(self.read_command(parent)),
                               MAX_COMMAND_LINES))
-        limit = max(40, width - PANEL_PAD - NAME_LEFT - LABEL_WIDTH)
-        lines = [(label, self.wrap(text, limit, most)) for label, text, most in fields]
-        top = DETAIL_TOP + sum(len(texts) for _, texts in lines) * LINE_HEIGHT + DETAIL_GAP
+        limit = max(40, width - PANEL_PAD - VALUE_LEFT)
+        lines, top = [], DETAIL_TOP
+        for label, text, most in fields:
+            spans = self.wrap(text, limit, most)
+            lines.append((label, spans, text, top))
+            top += len(spans) * LINE_HEIGHT
+        top += DETAIL_GAP
 
         names = []
         if isinstance(details.get('exe'), str):
@@ -549,13 +573,76 @@ class ProcessList(Canvas):
         for name, rect in detail['buttons']:
             if rect.Contains(x, inside):
                 return ('button', row['key'], name)
+        if x >= VALUE_LEFT - 2:
+            for index, (_, spans, _, field_top) in enumerate(detail['lines']):
+                if field_top <= inside < field_top + len(spans) * LINE_HEIGHT:
+                    return ('text', row['key'], index)
         return None
 
+    def locate(self, key, field, position):
+        top, _, _, detail = self.items[self.positions[key]]
+        _, spans, text, field_top = detail['lines'][field]
+        inside = position.y - self.list_top + self.offset - top - ROW_HEIGHT - field_top
+        if inside < 0:
+            return 0
+        line = int(inside // LINE_HEIGHT)
+        if line >= len(spans):
+            return len(text)
+        shown, start, count, truncated = spans[line]
+        edges = self.get_measure().GetPartialTextExtents(shown)
+        index, spot = 0, position.x - VALUE_LEFT
+        for index, edge in enumerate(edges):
+            if spot < ((edges[index - 1] if index else 0) + edge) / 2.0:
+                break
+        else:
+            index = len(edges)
+        if index > count:
+            return len(text) if truncated else start + count
+        return start + index
+
+    def get_selected_text(self):
+        if not self.selection or self.selection[0] not in self.positions:
+            return ''
+        key, field, anchor, focus = self.selection
+        detail = self.items[self.positions[key]][3]
+        if detail is None:
+            return ''
+        low, high = sorted((anchor, focus))
+        return detail['lines'][field][2][low:high]
+
+    def copy_selection(self):
+        text = self.get_selected_text()
+        if text:
+            self.put_clipboard(text)
+
+    def on_right_up(self, event):
+        target = self.hit_test(event.GetPosition())
+        if not self.get_selected_text() and target is not None and target[0] == 'text':
+            detail = self.items[self.positions[target[1]]][3]
+            self.selection = [target[1], target[2], 0, len(detail['lines'][target[2]][2])]
+            self.Refresh()
+        if not self.get_selected_text():
+            return
+        menu = wx.Menu()
+        item = menu.Append(wx.ID_COPY, 'Copy')
+        menu.Bind(wx.EVT_MENU, lambda _: self.copy_selection(), item)
+        self.PopupMenu(menu)
+        menu.Destroy()
+
     def on_motion(self, event):
+        if self.selecting:
+            focus = self.locate(self.selection[0], self.selection[1], event.GetPosition())
+            if focus != self.selection[3]:
+                self.selection[3] = focus
+                self.Refresh()
+            return
         target = self.hit_test(event.GetPosition())
         if target != self.hovered:
             self.hovered = target
-            self.SetCursor(wx.Cursor(wx.CURSOR_HAND if target else wx.CURSOR_ARROW))
+            if target is not None and target[0] == 'text':
+                self.SetCursor(wx.Cursor(wx.CURSOR_IBEAM))
+            else:
+                self.SetCursor(wx.Cursor(wx.CURSOR_HAND if target else wx.CURSOR_ARROW))
             self.Refresh()
 
     def on_leave(self, event):
@@ -565,7 +652,22 @@ class ProcessList(Canvas):
 
     def on_down(self, event):
         self.SetFocus()
-        self.pressed = self.hit_test(event.GetPosition())
+        target = self.hit_test(event.GetPosition())
+        if target is not None and target[0] == 'text':
+            key, field = target[1], target[2]
+            if event.ButtonDClick():
+                text = self.items[self.positions[key]][3]['lines'][field][2]
+                self.selection = [key, field, 0, len(text)]
+            else:
+                offset = self.locate(key, field, event.GetPosition())
+                self.selection = [key, field, offset, offset]
+                self.selecting = True
+                if not self.HasCapture():
+                    self.CaptureMouse()
+            self.Refresh()
+            return
+        self.selection = None
+        self.pressed = target
         if self.pressed is not None and not self.HasCapture():
             self.CaptureMouse()
         self.Refresh()
@@ -573,6 +675,9 @@ class ProcessList(Canvas):
     def on_up(self, event):
         if self.HasCapture():
             self.ReleaseMouse()
+        if self.selecting:
+            self.end_selecting()
+            return
         pressed, self.pressed = self.pressed, None
         if pressed is not None and pressed == self.hit_test(event.GetPosition()):
             self.act(pressed)
@@ -580,6 +685,15 @@ class ProcessList(Canvas):
 
     def on_lost(self, event):
         self.pressed = None
+        if self.selecting:
+            self.end_selecting()
+        self.Refresh()
+
+    def end_selecting(self):
+        self.selecting = False
+        if self.stale:
+            self.stale = False
+            self.relayout()
         self.Refresh()
 
     def on_wheel(self, event):
@@ -605,6 +719,9 @@ class ProcessList(Canvas):
                  wx.WXK_PAGEDOWN: page, wx.WXK_HOME: -self.extent, wx.WXK_END: self.extent}
         if code in steps:
             self.scroll_by(steps[code])
+        elif code == wx.WXK_ESCAPE and self.selection:
+            self.selection = None
+            self.Refresh()
         elif code == wx.WXK_ESCAPE and self.field.GetValue():
             self.field.SetValue('')
         elif code == wx.WXK_BACK:
@@ -615,12 +732,28 @@ class ProcessList(Canvas):
         else:
             event.Skip()
 
+    def copy_keyed(self, event):
+        # focusing this panel hands focus to the search box, so both see Ctrl+C;
+        # text marked in the search box keeps its own copy
+        copying = (event.GetKeyCode() in (ord('C'), wx.WXK_INSERT)
+                   and event.GetModifiers() == wx.MOD_CONTROL)
+        if copying and self.get_selected_text() and not self.field.GetStringSelection():
+            self.copy_selection()
+            return True
+        return False
+
+    def on_key_down(self, event):
+        if not self.copy_keyed(event):
+            event.Skip()
+
     def type_text(self, text):
         self.field.SetFocus()
         self.field.SetValue(text)
         self.field.SetInsertionPointEnd()
 
     def on_field_key(self, event):
+        if self.copy_keyed(event):
+            return
         code = event.GetKeyCode()
         page = self.get_view_height() - ROW_HEIGHT
         steps = {wx.WXK_UP: -ROW_HEIGHT, wx.WXK_DOWN: ROW_HEIGHT, wx.WXK_PAGEUP: -page,
@@ -685,14 +818,19 @@ class ProcessList(Canvas):
         else:
             text = details.get('exe') if name == 'path' else processes.join_cmdline(
                 details.get('cmdline'))
-            if text and wx.TheClipboard.Open():
-                wx.TheClipboard.SetData(wx.TextDataObject(text))
-                # the text stays on the clipboard after the app quits
-                wx.TheClipboard.Flush()
-                wx.TheClipboard.Close()
+            if text and self.put_clipboard(text):
                 copied = self.copied = (key, name)
                 wx.CallLater(COPIED_MS, self.clear_copied, copied)
                 self.Refresh()
+
+    def put_clipboard(self, text):
+        if not wx.TheClipboard.Open():
+            return False
+        wx.TheClipboard.SetData(wx.TextDataObject(text))
+        # the text stays on the clipboard after the app quits
+        wx.TheClipboard.Flush()
+        wx.TheClipboard.Close()
+        return True
 
     def notify(self):
         if self.on_change:
@@ -815,15 +953,16 @@ class ProcessList(Canvas):
     def draw_detail(self, gc, width, top, key, detail):
         theme = self.theme
         label_font, text_font = get_font(NOTE_FONT), get_font(VALUE_FONT)
-        line_top = top + DETAIL_TOP
-        for label, texts in detail['lines']:
+        selection = self.selection if self.selection and self.selection[0] == key else None
+        for field, (label, spans, text, field_top) in enumerate(detail['lines']):
+            line_top = top + field_top
             gc.SetFont(label_font, wx.Colour(theme['dim']))
             gc.DrawText(label, NAME_LEFT, get_text_top(label_font, line_top, LINE_HEIGHT))
-            denied = texts[0] in (DENIED, MISSING)
-            gc.SetFont(text_font, wx.Colour(theme['dim' if denied else 'text']))
-            for text in texts:
-                gc.DrawText(text, NAME_LEFT + LABEL_WIDTH,
-                            get_text_top(text_font, line_top, LINE_HEIGHT))
+            if selection and selection[1] == field:
+                self.draw_selection(gc, spans, sorted(selection[2:]), line_top)
+            gc.SetFont(text_font, wx.Colour(theme['dim' if text in (DENIED, MISSING) else 'text']))
+            for shown, _, _, _ in spans:
+                gc.DrawText(shown, VALUE_LEFT, get_text_top(text_font, line_top, LINE_HEIGHT))
                 line_top += LINE_HEIGHT
         for name, rect in detail['buttons']:
             target = ('button', key, name)
@@ -836,6 +975,27 @@ class ProcessList(Canvas):
             caption = COPIED if self.copied == (key, name) else CAPTIONS[name]
             draw_button(gc, theme, wx.Rect(rect.x, top + rect.y, rect.width, rect.height),
                         caption, state)
+
+    def draw_selection(self, gc, spans, bounds, line_top):
+        low, high = bounds
+        if low == high:
+            return
+        tone = wx.Colour(self.theme['accent'])
+        fill = wx.Colour(tone.Red(), tone.Green(), tone.Blue(), SELECTION_ALPHA)
+        for shown, start, count, truncated in spans:
+            end = start + count
+            first, last = max(low, start), min(high, end)
+            edges = self.get_measure().GetPartialTextExtents(shown) if shown else []
+            through = truncated and high > end
+            if first < last or (through and first <= end):
+                left = edges[first - start - 1] if first > start else 0
+                if through:
+                    right = edges[-1] if edges else 0
+                else:
+                    right = edges[last - start - 1] if last > start else 0
+                fill_rect(gc, fill, VALUE_LEFT + left, line_top + 1, max(1, right - left),
+                          LINE_HEIGHT - 2)
+            line_top += LINE_HEIGHT
 
     def draw_header(self, gc, width):
         theme = self.theme
