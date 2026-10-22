@@ -48,6 +48,12 @@ FILTER_PAD = 10
 FILTER_GAP = 6
 CLEAR_SIZE = 22
 CLEAR_GLYPH = 8
+INDENT = 14
+MAX_INDENT = 0.4
+TWIST = 11
+TWIST_GAP = 5
+HINT_MIN = 24
+CONSOLE_HOST = 'conhost.exe'
 CHEVRON = 10
 CHEVRON_X = BAND_INSET + 6 + CHEVRON / 2
 NAME_LEFT = BAND_INSET + 6 + CHEVRON + 6
@@ -85,6 +91,7 @@ USAGE_TESTS = {'any': lambda row: True,
                'memory': lambda row: row['memory'] >= 100 << 20,
                'large': lambda row: row['memory'] >= 1 << 30}
 SORTS = ('name', 'cpu', 'memory')
+VIEWS = (('list', 'List'), ('tree', 'Tree'))
 
 
 def format_cpu(value):
@@ -130,7 +137,13 @@ class ProcessList(Canvas):
         self.descending = bool(state.get('descending', self.sort != 'name'))
         self.kind = state.get('kind') if state.get('kind') in dict(KINDS) else 'all'
         self.usage = state.get('usage') if state.get('usage') in dict(USAGES) else 'any'
+        self.matched = 0
+        self.view = state.get('view') if state.get('view') in dict(VIEWS) else 'list'
         self.filter = ''
+        self.folded = set()
+        self.commands = {}
+        self.hints = {}
+        self.services = {}
         self.expanded = set()
         self.details = {}
         self.copied = None
@@ -183,11 +196,26 @@ class ProcessList(Canvas):
         self.rows = rows
         self.by_pid = {row['pid']: row for row in rows}
         windowed = processes.get_window_pids()
+        hosts = [row for row in rows if row['name'].lower() == CONSOLE_HOST]
         for row in rows:
-            row['kind'] = self.get_kind(row, windowed)
+            if row['name'].lower() != CONSOLE_HOST:
+                row['kind'] = self.get_kind(row, windowed)
+        for row in hosts:
+            parent = self.get_parent(row)
+            row['kind'] = parent['kind'] if parent is not None and 'kind' in parent \
+                else self.get_kind(row, windowed)
+        self.set_hints(rows, hosts)
         self.expanded &= set(times)
+        self.folded &= set(times)
         self.details = {key: value for key, value in self.details.items() if key in times}
         self.relayout()
+
+    def get_parent(self, row):
+        # a reused PID can point at a younger process that is not the parent
+        parent = self.by_pid.get(row['ppid'])
+        if parent is None or parent is row or parent['created'] > row['created']:
+            return None
+        return parent
 
     def get_kind(self, row, windowed):
         # a browser's helpers share its name and descend from the process that owns the window
@@ -195,35 +223,135 @@ class ProcessList(Canvas):
         for _ in range(16):
             if current['pid'] in windowed:
                 return 'apps'
-            parent = self.by_pid.get(current['ppid'])
-            if (parent is None or parent['name'] != row['name']
-                    or parent['created'] > current['created']):
+            parent = self.get_parent(current)
+            if parent is None or parent['name'] != row['name']:
                 break
             current = parent
         return 'windows' if processes.is_windows_path(row['path']) else 'background'
 
+    def read_command(self, row):
+        key = row['key']
+        if key not in self.commands:
+            self.commands[key] = processes.read_command_line(row['pid'])
+        return self.commands[key]
+
+    def set_hints(self, rows, hosts):
+        alive = {row['key'] for row in rows}
+        self.commands = {key: value for key, value in self.commands.items() if key in alive}
+        hints = {key: value for key, value in self.hints.items() if key in alive}
+        fresh = [row for row in rows if row['key'] not in hints]
+        if fresh:
+            self.services = processes.read_services()
+        for row in fresh:
+            if row['name'].lower() == CONSOLE_HOST:
+                continue
+            hint = ''
+            if processes.needs_summary(row['name']):
+                command = self.read_command(row)
+                hint = processes.summarize_args(processes.split_command_line(command))
+            if not hint:
+                names = [name for name, _ in self.services.get(row['pid'], [])]
+                hint = ', '.join(names[:2]) + (' +%d' % (len(names) - 2)
+                                               if len(names) > 2 else '')
+            hints[row['key']] = hint
+        # conhost says nothing of itself; the console program that started it is its parent
+        for row in hosts:
+            if row['key'] in hints:
+                continue
+            parent = self.get_parent(row)
+            if parent is None:
+                hints[row['key']] = ''
+                continue
+            inner = hints.get(parent['key'])
+            hints[row['key']] = 'for %s%s' % (parent['name'], ' · ' + inner if inner else '')
+        self.hints = hints
+        for row in rows:
+            row['hint'] = hints.get(row['key'], '')
+
     def matches(self, row, needle):
         return (needle in row['name'].lower() or str(row['pid']).startswith(needle)
-                or needle in (row['path'] or '').lower())
+                or needle in (row['path'] or '').lower() or needle in row['hint'].lower())
+
+    def sort_rows(self, rows):
+        if self.sort == 'name':
+            rows.sort(key=lambda row: (row['name'].lower(), row['pid']), reverse=self.descending)
+        elif self.sort == 'cpu':
+            rows.sort(key=lambda row: (-1 if row['cpu'] is None else row['cpu'], row['memory']),
+                      reverse=self.descending)
+        else:
+            rows.sort(key=lambda row: row['memory'], reverse=self.descending)
+        return rows
 
     def get_shown(self):
         needle = self.filter.lower()
         test = USAGE_TESTS[self.usage]
-        shown = [row for row in self.rows if (self.kind == 'all' or row['kind'] == self.kind)
-                 and test(row) and (not needle or self.matches(row, needle))]
-        if self.sort == 'name':
-            shown.sort(key=lambda row: (row['name'].lower(), row['pid']), reverse=self.descending)
-        elif self.sort == 'cpu':
-            shown.sort(key=lambda row: (-1 if row['cpu'] is None else row['cpu'], row['memory']),
-                       reverse=self.descending)
-        else:
-            shown.sort(key=lambda row: row['memory'], reverse=self.descending)
+        passing = {row['key'] for row in self.rows
+                   if (self.kind == 'all' or row['kind'] == self.kind) and test(row)
+                   and (not needle or self.matches(row, needle))}
+        self.matched = len(passing)
+        for row in self.rows:
+            row['context'], row['branch'], row['inside'] = False, False, 0
+        if self.view != 'tree':
+            return [(row, 0) for row in self.sort_rows([row for row in self.rows
+                                                        if row['key'] in passing])]
+        children, roots = {}, []
+        for row in self.rows:
+            parent = self.get_parent(row)
+            if parent is None:
+                roots.append(row)
+            else:
+                children.setdefault(parent['key'], []).append(row)
+        keep = None
+        if self.is_filtered():
+            # a match keeps its ancestors so it still sits where it runs
+            keep = set()
+            for row in self.rows:
+                current = row if row['key'] in passing else None
+                while current is not None and current['key'] not in keep:
+                    keep.add(current['key'])
+                    current = self.get_parent(current)
+        shown, seen = [], set()
+        stack = [(row, 0) for row in reversed(self.sort_rows(roots))]
+        while stack:
+            row, depth = stack.pop()
+            key = row['key']
+            if key in seen or (keep is not None and key not in keep):
+                continue
+            seen.add(key)
+            kids = [kid for kid in children.get(key, []) if keep is None or kid['key'] in keep]
+            row['context'] = key not in passing
+            row['branch'] = bool(kids) and keep is None
+            if row['branch'] and key in self.folded:
+                row['inside'] = self.count_inside(key, children)
+                kids = []
+            shown.append((row, depth))
+            stack.extend((kid, depth + 1) for kid in reversed(self.sort_rows(kids)))
         return shown
+
+    def count_inside(self, key, children):
+        count, stack = 0, [key]
+        while stack:
+            kids = children.get(stack.pop(), [])
+            count += len(kids)
+            stack.extend(kid['key'] for kid in kids)
+        return count
+
+    def get_name_left(self, row, width):
+        if self.view != 'tree':
+            return NAME_LEFT
+        cpu_left = self.get_columns(width)[0]
+        indent = min(row['depth'] * INDENT, int((cpu_left - NAME_LEFT) * MAX_INDENT))
+        return NAME_LEFT + indent + TWIST + TWIST_GAP
+
+    def get_twist_rect(self, row, width, y=0):
+        left = self.get_name_left(row, width) - TWIST - TWIST_GAP
+        return wx.Rect(left, y + (ROW_HEIGHT - TWIST) // 2, TWIST, TWIST)
 
     def relayout(self):
         width = self.GetClientSize()[0]
         items, top = [], 0
-        for row in self.get_shown():
+        for row, depth in self.get_shown():
+            row['depth'] = depth
             detail = self.get_detail(row, width) if row['key'] in self.expanded else None
             height = ROW_HEIGHT + (detail['height'] if detail else 0)
             items.append((top, height, row, detail))
@@ -276,8 +404,8 @@ class ProcessList(Canvas):
         return self.wraps[key]
 
     def get_parent_text(self, row):
-        parent = self.by_pid.get(row['ppid'])
-        if parent is not None and parent['created'] <= row['created']:
+        parent = self.get_parent(row)
+        if parent is not None:
             return '%s · PID %d' % (parent['name'], parent['pid'])
         return 'PID %d · exited' % row['ppid'] if row['ppid'] else MISSING
 
@@ -299,6 +427,14 @@ class ProcessList(Canvas):
                       format_bytes(row['commit'])), 2),
                   ('I/O', 'Read %s · written %s' % (format_bytes(row['read']),
                                                     format_bytes(row['written'])), 1)]
+        services = self.services.get(row['pid'])
+        if services:
+            fields.insert(2, ('Services', ', '.join(display or name for name, display in services),
+                              4))
+        parent = self.get_parent(row)
+        if row['name'].lower() == CONSOLE_HOST and parent is not None:
+            fields.insert(2, ('Console of', describe(self.read_command(parent)),
+                              MAX_COMMAND_LINES))
         limit = max(40, width - PANEL_PAD - NAME_LEFT - LABEL_WIDTH)
         lines = [(label, self.wrap(text, limit, most)) for label, text, most in fields]
         top = DETAIL_TOP + sum(len(texts) for _, texts in lines) * LINE_HEIGHT + DETAIL_GAP
@@ -327,11 +463,18 @@ class ProcessList(Canvas):
 
     def layout_header(self, width):
         top = HEADER_BAND + 1 + FILTER_PAD
-        self.field_rect = wx.Rect(PANEL_PAD, top, max(0, width - PANEL_PAD * 2), FIELD_HEIGHT)
+        chips, right = [], width - PANEL_PAD
+        for value, caption in reversed(VIEWS):
+            chip_width = get_button_width(caption)
+            right -= chip_width
+            chips.insert(0, ('view', value, caption, wx.Rect(
+                right, top + (FIELD_HEIGHT - BUTTON_HEIGHT) // 2, chip_width, BUTTON_HEIGHT)))
+            right -= BUTTON_GAP
+        self.field_rect = wx.Rect(PANEL_PAD, top, max(0, right - BUTTON_GAP - PANEL_PAD),
+                                  FIELD_HEIGHT)
         self.clear_rect = wx.Rect(self.field_rect.x + self.field_rect.width - CLEAR_SIZE - 2,
                                   top + (FIELD_HEIGHT - CLEAR_SIZE) // 2, CLEAR_SIZE, CLEAR_SIZE)
         y = top + FIELD_HEIGHT + FILTER_GAP
-        chips = []
         for group, options in (('kind', KINDS), ('usage', USAGES)):
             left = PANEL_PAD
             for value, caption in options:
@@ -352,7 +495,7 @@ class ProcessList(Canvas):
 
     def get_state(self):
         return {'sort': self.sort, 'descending': self.descending, 'kind': self.kind,
-                'usage': self.usage}
+                'usage': self.usage, 'view': self.view}
 
     def is_filtered(self):
         return bool(self.filter) or self.kind != 'all' or self.usage != 'any'
@@ -399,6 +542,9 @@ class ProcessList(Canvas):
             return None
         inside = spot - top - ROW_HEIGHT
         if inside < 0:
+            if (row['branch'] and self.get_twist_rect(row, width).Inflate(4, 4)
+                    .Contains(x, spot - top)):
+                return ('fold', row['key'])
             return ('row', row['key'])
         for name, rect in detail['buttons']:
             if rect.Contains(x, inside):
@@ -512,6 +658,12 @@ class ProcessList(Canvas):
                 self.sort, self.descending = key, key != 'name'
             self.relayout()
             self.notify()
+        elif kind == 'fold':
+            if key in self.folded:
+                self.folded.discard(key)
+            else:
+                self.folded.add(key)
+            self.relayout()
         elif kind == 'row':
             if key in self.expanded:
                 self.expanded.discard(key)
@@ -566,7 +718,7 @@ class ProcessList(Canvas):
         total = len(self.rows)
         if not self.is_filtered():
             return '%d running' % total
-        return '%d of %d' % (len(self.items), total)
+        return '%d of %d' % (self.matched, total)
 
     def draw(self, gc, width, height):
         theme = self.theme
@@ -618,22 +770,47 @@ class ProcessList(Canvas):
                 gc.DrawText(text, right - get_text_width(value_font, text),
                             get_text_top(value_font, y, ROW_HEIGHT))
 
+        if row['branch']:
+            self.draw_twist(gc, self.get_twist_rect(row, width, y), key in self.folded,
+                            self.hovered == ('fold', key))
         name_font, note_font = get_font(NAME_FONT), get_font(NOTE_FONT)
-        pid = 'PID %d' % row['pid']
-        room = cpu_left - COLUMN_GAP - NAME_LEFT
+        name_left = self.get_name_left(row, width)
         name_top = get_text_top(name_font, y, ROW_HEIGHT)
-        gc.SetFont(name_font, wx.Colour(theme['text']))
-        name = self.fit_text(gc, row['name'], max(0, room - get_text_width(note_font, pid)
-                                                  - PID_GAP))
-        gc.DrawText(name, NAME_LEFT, name_top)
-        pid_left = NAME_LEFT + get_text_width(name_font, name) + PID_GAP
-        if pid_left + get_text_width(note_font, pid) <= NAME_LEFT + room:
+        note_top = name_top + get_ink(name_font)[1] - get_ink(note_font)[1]
+        pid = 'PID %d' % row['pid']
+        pid_right = cpu_left - COLUMN_GAP
+        pid_left = pid_right - get_text_width(note_font, pid)
+        gc.SetFont(note_font, wx.Colour(theme['dim']))
+        gc.DrawText(pid, pid_left, note_top)
+        room = max(0, pid_left - PID_GAP * 2 - name_left)
+        gc.SetFont(name_font, wx.Colour(theme['dim' if row['context'] else 'text']))
+        name = self.fit_text(gc, row['name'], room)
+        gc.DrawText(name, name_left, name_top)
+        note = row['hint']
+        if row['inside']:
+            note = '%d inside%s' % (row['inside'], ' · ' + note if note else '')
+        used = get_text_width(name_font, name) + PID_GAP
+        if note and room - used >= HINT_MIN:
             gc.SetFont(note_font, wx.Colour(theme['dim']))
-            baseline = name_top + get_ink(name_font)[1]
-            gc.DrawText(pid, pid_left, baseline - get_ink(note_font)[1])
+            gc.DrawText(self.fit_text(gc, note, room - used), name_left + used, note_top)
 
         if open_:
             self.draw_detail(gc, width, y + ROW_HEIGHT, key, detail)
+
+    def draw_twist(self, gc, rect, folded, lit):
+        theme = self.theme
+        if lit:
+            fill_rect(gc, theme['control_hover'], rect.x - 3, rect.y - 3, rect.width + 6,
+                      rect.height + 6, PANEL_RADIUS)
+        colour = wx.Colour(theme['text' if lit else 'dim'])
+        gc.SetPen(gc.CreatePen(wx.GraphicsPenInfo(colour).Width(1)))
+        gc.SetBrush(wx.TRANSPARENT_BRUSH)
+        gc.DrawRoundedRectangle(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1, 2)
+        middle_x, middle_y = rect.x + rect.width / 2.0, rect.y + rect.height / 2.0
+        arm = rect.width / 2.0 - 3
+        gc.StrokeLine(middle_x - arm, middle_y, middle_x + arm, middle_y)
+        if folded:
+            gc.StrokeLine(middle_x, middle_y - arm, middle_x, middle_y + arm)
 
     def draw_detail(self, gc, width, top, key, detail):
         theme = self.theme

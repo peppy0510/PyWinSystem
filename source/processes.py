@@ -10,7 +10,10 @@ email: peppy0510@hotmail.com
 import ctypes
 import datetime
 import os
+import re
+import shlex
 import subprocess
+import winreg
 
 from ctypes import wintypes
 
@@ -24,6 +27,15 @@ EPOCH_OFFSET = 116444736000000000
 TICKS = 10 ** 7
 IDLE_PID = 0
 SYSTEM_PROCESS_ID_INFORMATION = 88
+SC_MANAGER_ENUMERATE_SERVICE = 0x0004
+SC_ENUM_PROCESS_INFO = 0
+SERVICE_WIN32 = 0x00000030
+SERVICE_ACTIVE = 0x00000001
+ERROR_MORE_DATA = 234
+PROCESS_COMMAND_LINE_INFORMATION = 60
+PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+STATUS_BUFFER_OVERFLOW = 0x80000005
+STATUS_BUFFER_TOO_SMALL = 0xC0000023
 GW_OWNER = 4
 GWL_EXSTYLE = -20
 WS_EX_TOOLWINDOW = 0x00000080
@@ -56,6 +68,15 @@ class ProcessInformation(ctypes.Structure):
                 ('write_bytes', ctypes.c_longlong), ('other_bytes', ctypes.c_longlong)]
 
 
+class ServiceStatus(ctypes.Structure):
+    _fields_ = [('name', wintypes.LPWSTR), ('display', wintypes.LPWSTR),
+                ('type', wintypes.DWORD), ('state', wintypes.DWORD),
+                ('controls', wintypes.DWORD), ('exit_code', wintypes.DWORD),
+                ('service_exit_code', wintypes.DWORD), ('check_point', wintypes.DWORD),
+                ('wait_hint', wintypes.DWORD), ('pid', wintypes.DWORD),
+                ('flags', wintypes.DWORD)]
+
+
 query = ctypes.windll.ntdll.NtQuerySystemInformation
 query.argtypes = [wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG, ctypes.POINTER(wintypes.ULONG)]
 query.restype = wintypes.ULONG
@@ -65,6 +86,25 @@ user32.GetWindow.argtypes = [wintypes.HWND, wintypes.UINT]
 user32.GetWindow.restype = wintypes.HWND
 kernel32 = ctypes.windll.kernel32
 kernel32.QueryDosDeviceW.argtypes = [wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD]
+kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+kernel32.OpenProcess.restype = wintypes.HANDLE
+kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+inquire = ctypes.windll.ntdll.NtQueryInformationProcess
+inquire.argtypes = [wintypes.HANDLE, wintypes.ULONG, ctypes.c_void_p, wintypes.ULONG,
+                    ctypes.POINTER(wintypes.ULONG)]
+inquire.restype = wintypes.ULONG
+advapi32 = ctypes.windll.advapi32
+advapi32.OpenSCManagerW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR, wintypes.DWORD]
+advapi32.OpenSCManagerW.restype = wintypes.HANDLE
+advapi32.EnumServicesStatusExW.argtypes = [
+    wintypes.HANDLE, ctypes.c_int, wintypes.DWORD, wintypes.DWORD, ctypes.c_void_p,
+    wintypes.DWORD, ctypes.POINTER(wintypes.DWORD), ctypes.POINTER(wintypes.DWORD),
+    ctypes.POINTER(wintypes.DWORD), wintypes.LPCWSTR]
+advapi32.CloseServiceHandle.argtypes = [wintypes.HANDLE]
+shell32 = ctypes.windll.shell32
+shell32.CommandLineToArgvW.argtypes = [wintypes.LPCWSTR, ctypes.POINTER(ctypes.c_int)]
+shell32.CommandLineToArgvW.restype = ctypes.POINTER(wintypes.LPWSTR)
 WindowVisitor = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
 
@@ -215,3 +255,201 @@ def join_cmdline(parts):
 def open_location(path):
     if path and os.path.exists(path):
         subprocess.Popen(['explorer.exe', '/select,', os.path.normpath(path)])
+
+
+def read_command_line(pid):
+    handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+    if not handle:
+        return None
+    try:
+        size = wintypes.ULONG(0)
+        buffer = ctypes.create_string_buffer(4096)
+        for _ in range(3):
+            status = inquire(handle, PROCESS_COMMAND_LINE_INFORMATION, buffer, len(buffer),
+                             ctypes.byref(size))
+            if status == 0:
+                text = UnicodeString.from_buffer(buffer)
+                return ctypes.wstring_at(text.buffer, text.length // 2) if text.buffer else ''
+            if status not in (STATUS_INFO_LENGTH_MISMATCH, STATUS_BUFFER_OVERFLOW,
+                              STATUS_BUFFER_TOO_SMALL) or size.value <= len(buffer):
+                return None
+            buffer = ctypes.create_string_buffer(size.value)
+        return None
+    finally:
+        kernel32.CloseHandle(handle)
+
+
+def split_command_line(text):
+    if not text:
+        return []
+    count = ctypes.c_int(0)
+    found = shell32.CommandLineToArgvW(text, ctypes.byref(count))
+    if not found:
+        return text.split()
+    try:
+        return [found[index] for index in range(count.value)]
+    finally:
+        kernel32.LocalFree(found)
+
+
+GENERIC_FILES = {'main', 'server', 'index', 'app', 'cli', '__main__', 'run', 'start', 'service'}
+PLAIN_FOLDERS = {'src', 'source', 'lib', 'bin', 'dist', 'build', 'out', 'scripts', '.venv', 'venv',
+                 'site-packages', 'node_modules'}
+SHELLS = {'sh', 'bash', 'zsh', 'dash'}
+HASHED = re.compile(r'^[0-9a-fA-F]{16,}$')
+
+
+def get_stem(path):
+    return os.path.splitext(re.split(r'[\\/]', path)[-1])[0].lower()
+
+
+def name_script(path):
+    parts = [part for part in re.split(r'[\\/]+', path) if part]
+    if not parts:
+        return ''
+    if get_stem(parts[-1]) in GENERIC_FILES:
+        for folder in reversed(parts[:-1]):
+            if folder.lower() not in PLAIN_FOLDERS and not HASHED.match(folder):
+                return folder + '/' + parts[-1]
+    return parts[-1]
+
+
+def get_operand(args, valued=()):
+    skip = False
+    for index, arg in enumerate(args):
+        if skip:
+            skip = False
+        elif arg in valued:
+            skip = True
+        elif not arg.startswith('-'):
+            return index
+    return None
+
+
+def after(args, flags):
+    for index, arg in enumerate(args[:-1]):
+        if arg.lower() in flags:
+            return args[index + 1]
+    return None
+
+
+def summarize_python(args):
+    module = after(args, ('-m',))
+    if module:
+        return module
+    if '-c' in args:
+        return 'inline code'
+    index = get_operand(args, ('-X', '-W', '-Q'))
+    return name_script(args[index]) if index is not None else ''
+
+
+def summarize_wsl(args):
+    for index, arg in enumerate(args):
+        if arg in ('--', '-e', '--exec'):
+            return summarize_args(args[index + 1:])
+    return after(args, ('-d', '--distribution')) or ''
+
+
+def summarize_shell(args):
+    command = after(args, ('-c',))
+    if command is None:
+        return ''
+    try:
+        return summarize_args(shlex.split(command))
+    except ValueError:
+        return command
+
+
+def read_com_name(args):
+    found = re.search(r'\{[0-9A-Fa-f-]{36}\}', ' '.join(args))
+    if not found:
+        return ''
+    for key in ('AppID\\' + found.group(0), 'CLSID\\' + found.group(0)):
+        try:
+            with winreg.OpenKey(winreg.HKEY_CLASSES_ROOT, key) as opened:
+                name = winreg.QueryValueEx(opened, '')[0]
+                if name:
+                    return name
+        except OSError:
+            continue
+    return 'COM ' + found.group(0)[1:9]
+
+
+def summarize_args(args):
+    if not args:
+        return ''
+    stem, rest = get_stem(args[0]), args[1:]
+    if stem.startswith('python') or stem in ('py', 'pyw'):
+        return summarize_python(rest)
+    if stem in ('node', 'bun', 'deno'):
+        index = get_operand(rest, ('-r', '--require', '--import', '--loader'))
+        return name_script(rest[index]) if index is not None else ''
+    if stem == 'wsl':
+        return summarize_wsl(rest)
+    if stem in SHELLS:
+        return summarize_shell(rest) or stem
+    if stem == 'svchost':
+        return after(rest, ('-s',)) or after(rest, ('-k',)) or ''
+    if stem == 'dllhost':
+        return read_com_name(rest)
+    if stem == 'rundll32':
+        return name_script(rest[0].split(',')[0]) if rest else ''
+    if stem == 'cmd':
+        for index, arg in enumerate(rest):
+            if arg.lower() in ('/c', '/k'):
+                tail = rest[index + 1:]
+                return summarize_args(tail) or name_script(tail[0]) if tail else ''
+        return ''
+    if stem in ('powershell', 'pwsh'):
+        script = after(rest, ('-file', '-f'))
+        if script:
+            return name_script(script)
+        command = after(rest, ('-command', '-c'))
+        return command[:60] if command else ''
+    if stem in ('java', 'javaw'):
+        jar = after(rest, ('-jar',))
+        if jar:
+            return name_script(jar)
+        index = get_operand(rest, ('-cp', '-classpath', '--class-path'))
+        return rest[index] if index is not None else ''
+    return name_script(args[0])
+
+
+SUMMARIZED = {'python', 'pythonw', 'py', 'pyw', 'node', 'bun', 'deno', 'wsl', 'svchost',
+              'dllhost', 'rundll32', 'cmd', 'powershell', 'pwsh', 'java', 'javaw', 'sh', 'bash'}
+
+
+def needs_summary(name):
+    stem = get_stem(name)
+    return stem in SUMMARIZED or stem.startswith('python')
+
+
+def read_services():
+    # the service manager names the PID of every running service without administrator rights,
+    # which svchost's own command line does not
+    services = {}
+    manager = advapi32.OpenSCManagerW(None, None, SC_MANAGER_ENUMERATE_SERVICE)
+    if not manager:
+        return services
+    try:
+        needed, count, resume = wintypes.DWORD(0), wintypes.DWORD(0), wintypes.DWORD(0)
+        buffer = ctypes.create_string_buffer(256 * 1024)
+        while True:
+            done = advapi32.EnumServicesStatusExW(
+                manager, SC_ENUM_PROCESS_INFO, SERVICE_WIN32, SERVICE_ACTIVE, buffer,
+                len(buffer), ctypes.byref(needed), ctypes.byref(count), ctypes.byref(resume),
+                None)
+            more = not done and ctypes.GetLastError() == ERROR_MORE_DATA
+            if not done and not more:
+                return services
+            entries = ctypes.cast(buffer, ctypes.POINTER(ServiceStatus))
+            for index in range(count.value):
+                entry = entries[index]
+                if entry.pid:
+                    services.setdefault(entry.pid, []).append((entry.name, entry.display))
+            if not more:
+                return services
+            if needed.value > len(buffer):
+                buffer = ctypes.create_string_buffer(needed.value)
+    finally:
+        advapi32.CloseServiceHandle(manager)
