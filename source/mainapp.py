@@ -13,9 +13,12 @@ import time
 import winreg
 import wx
 
+import processes
+
 from diskbox import DiskBox
 from displaystate import DisplayState
 from hardwarebox import HardwareBox
+from processbox import ProcessBox
 from resourcebox import ResourceBox
 from sampler import Sampler
 from settingsbox import SettingsBox
@@ -36,8 +39,8 @@ from utilities import save_settings
 
 DEFAULT_SIZE = (460, 720)
 
-MENU_ITEMS = (('Resources', 'chart'), ('Hardware', 'chip'), ('Disks', 'disk'), None,
-              ('Settings', 'settings'))
+MENU_ITEMS = (('Resources', 'chart'), ('Processes', 'list'), ('Hardware', 'chip'),
+              ('Disks', 'disk'), None, ('Settings', 'settings'))
 
 FRAME_STYLE = wx.DEFAULT_FRAME_STYLE & ~wx.CAPTION
 
@@ -63,6 +66,8 @@ class SamplerThread(threading.Thread):
         super().__init__(name='sampler', daemon=True)
         self.frame = frame
         self.sampler = Sampler()
+        self.table = processes.ProcessTable()
+        self.listing = False
         self.interval = 1.0
         self.running = True
         self.visible = True
@@ -78,6 +83,12 @@ class SamplerThread(threading.Thread):
                 target = time.perf_counter()
             if not self.running or not self.visible:
                 continue
+            if self.listing:
+                try:
+                    call_painted(self.frame, self.frame.on_processes, self.table.read(),
+                                 time.monotonic())
+                except Exception:
+                    pass
             try:
                 data = self.sampler.sample()
                 call_painted(self.frame, self.frame.on_sample, data)
@@ -107,12 +118,15 @@ class MainFrame(wx.Frame):
 
         self.book = wx.Simplebook(self)
         self.resourcebox = ResourceBox(self.book, theme, self.folds, self.store_settings)
+        self.processbox = ProcessBox(self.book, theme, settings.get('processes'),
+                                     self.store_settings, self.quit)
         self.hardwarebox = HardwareBox(self.book, theme, self.folds, self.store_settings)
         self.diskbox = DiskBox(self.book, theme, self.folds, self.store_settings,
                                self.on_disks, self.quit)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
                                        self.folds, self.store_settings)
-        for page in (self.resourcebox, self.hardwarebox, self.diskbox, self.settingsbox):
+        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
+                     self.settingsbox):
             self.book.AddPage(page, '')
 
         self.titlebar = TitleBar(self, theme, self.on_menu, self.toggle_maximize)
@@ -176,7 +190,8 @@ class MainFrame(wx.Frame):
         self.book.SetBackgroundColour(wx.Colour(theme['bg']))
         self.titlebar.set_theme(theme)
         self.sidemenu.set_theme(theme)
-        for page in (self.resourcebox, self.hardwarebox, self.diskbox, self.settingsbox):
+        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
+                     self.settingsbox):
             page.apply_theme(theme)
         apply_titlebar_theme(self, theme)
         self.Refresh()
@@ -186,6 +201,9 @@ class MainFrame(wx.Frame):
 
     def on_select(self, index):
         self.book.SetSelection(index)
+        listing = self.book.GetPage(index) is self.processbox
+        self.processbox.set_active(listing)
+        self.sampler.listing = listing
 
     def toggle_maximize(self):
         # Windows maximizes a captionless frame past the work area and over the taskbar
@@ -271,6 +289,10 @@ class MainFrame(wx.Frame):
         if self:
             self.resourcebox.set_data(data)
 
+    def on_processes(self, rows, now):
+        if self:
+            self.processbox.set_rows(rows, now)
+
     def on_size(self, event):
         self.sidemenu.place(TitleBar.HEIGHT)
         event.Skip()
@@ -282,6 +304,7 @@ class MainFrame(wx.Frame):
         settings.update({
             'rect': self.stored_rect,
             'folded_panels': sorted(self.folds),
+            'processes': self.processbox.get_state(),
         })
         save_settings(settings)
 

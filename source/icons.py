@@ -83,6 +83,16 @@ def draw_menu(gc, cx, cy, size, colour, width):
         gc.StrokeLine(cx - half, cy + offset, cx + half, cy + offset)
 
 
+def draw_list(gc, cx, cy, size, colour, width):
+    for offset in (-size * 0.30, 0.0, size * 0.30):
+        gc.StrokeLine(cx - size * 0.16, cy + offset, cx + size * 0.42, cy + offset)
+    gc.SetPen(wx.TRANSPARENT_PEN)
+    gc.SetBrush(wx.Brush(colour))
+    dot = size * 0.13
+    for offset in (-size * 0.30, 0.0, size * 0.30):
+        gc.DrawEllipse(cx - size * 0.40 - dot / 2, cy + offset - dot / 2, dot, dot)
+
+
 def draw_minimize(gc, cx, cy, size, colour, width):
     gc.StrokeLine(cx - size * 0.40, cy, cx + size * 0.40, cy)
 
@@ -122,6 +132,7 @@ HANDLERS = {
     'chart': draw_chart,
     'settings': draw_settings,
     'menu': draw_menu,
+    'list': draw_list,
     'minimize': draw_minimize,
     'maximize': draw_maximize,
     'restore': draw_restore,
