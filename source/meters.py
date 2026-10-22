@@ -13,6 +13,8 @@ import wx
 
 from controls import CardBase
 from controls import draw_row_face
+from hovertip import hide_hover_tip
+from hovertip import show_hover_tip
 from utilities import fill_rect
 from utilities import get_font
 from utilities import get_text_width
@@ -25,6 +27,7 @@ MIN_LABEL = 100
 # a quick answer would flip a busy caption on and off in a blink, so it waits this long
 BUSY_DELAY = 400
 BAR_HEIGHT = 6
+BAR_RADIUS = 1
 VALUE_FONT = 8.5
 # a rate can switch from B/s to KB/s, so rate units sit left-aligned in a column of their own;
 # a fixed unit stays put under plain right alignment
@@ -68,6 +71,33 @@ def format_rate(value, scale):
 def get_unit_width():
     font = get_font(VALUE_FONT, bold=True)
     return max(get_text_width(font, unit) for unit in UNITS)
+
+
+def format_ratio(value):
+    return '—' if value is None else '%d%%' % round(value * 100)
+
+
+def format_ago(seconds):
+    seconds = int(round(seconds))
+    if seconds <= 0:
+        return 'Now'
+    if seconds < 60:
+        return '%d s ago' % seconds
+    minutes, rest = divmod(seconds, 60)
+    return '%d min %d s ago' % (minutes, rest) if rest else '%d min ago' % minutes
+
+
+def find_sample(hover, left, width, capacity, length):
+    # the newest sample sits on the right edge, as draw_series lays them out
+    if hover is None or not length:
+        return None
+    step = width / float(max(1, capacity - 1))
+    start = left + width - step * (length - 1)
+    index = int(round((hover - start) / step)) if step else length - 1
+    if index < 0:
+        return None
+    index = min(index, length - 1)
+    return index, start + step * index
 
 
 def get_watt_ceiling(value):
@@ -186,6 +216,8 @@ class MeterCard(ReadoutCard):
 
     value = None
     share = None
+    hover = False
+    BAR_REACH = 8
 
     def set_value(self, value, description=None, share=None):
         # share marks the part of the bar that belongs to WSL
@@ -195,6 +227,31 @@ class MeterCard(ReadoutCard):
             changed = True
         if changed:
             self.Refresh()
+            self.update_tip()
+
+    def on_track(self, event):
+        width, height = self.GetClientSize()
+        left, slot_right, _, _ = self.get_grid(width)
+        x, y = event.GetPosition()
+        self.hover = left <= x <= slot_right and abs(y - height / 2) <= self.BAR_REACH
+        self.update_tip(self.ClientToScreen(event.GetPosition()))
+        event.Skip()
+
+    def on_leave(self, event):
+        if self.hover:
+            self.hover = False
+            self.update_tip()
+
+    def update_tip(self, point=None):
+        if not self.hover or self.value is None:
+            hide_hover_tip(self)
+            return
+        lines = [(self.label, 'dim'), ('Used  %s' % format_ratio(self.value), 'text')]
+        if self.share is not None:
+            lines.append(('WSL  %s' % format_ratio(self.share), 'text'))
+        if self.description:
+            lines.append((self.description, 'dim'))
+        show_hover_tip(self, self.theme, lines, point)
 
     def draw_control(self, gc, width, height):
         theme = self.theme
@@ -205,14 +262,14 @@ class MeterCard(ReadoutCard):
                         height / 2, 'warn' if high else 'text')
         bar_width = slot_right - left
         top = (height - BAR_HEIGHT) / 2
-        fill_rect(gc, theme['track'], left, top, bar_width, BAR_HEIGHT, BAR_HEIGHT / 2)
+        fill_rect(gc, theme['grid'], left, top, bar_width, BAR_HEIGHT, BAR_RADIUS)
         if value:
             fill_rect(gc, theme['warn'] if high else theme['accent'], left, top,
-                      max(BAR_HEIGHT, bar_width * value), BAR_HEIGHT, BAR_HEIGHT / 2)
+                      bar_width * value, BAR_HEIGHT, BAR_RADIUS)
         if value and self.share:
             share = max(0.0, min(value, self.share))
             fill_rect(gc, mix(theme['accent'], theme['text'], 0.55), left, top,
-                      max(BAR_HEIGHT, bar_width * share), BAR_HEIGHT, BAR_HEIGHT / 2)
+                      bar_width * share, BAR_HEIGHT, BAR_RADIUS)
         return left
 
 
@@ -221,6 +278,9 @@ class RateCard(ReadoutCard):
     SPARK_HEIGHT = 26
     LINE_GAP = 8
 
+    hover = None
+    interval = 1.0
+
     def __init__(self, parent, theme, label, description='', names=('R', 'W'), capacity=300):
         super().__init__(parent, theme, label, description)
         self.names = names
@@ -228,18 +288,62 @@ class RateCard(ReadoutCard):
         self.capacity = capacity
         self.history = (collections.deque(maxlen=capacity), collections.deque(maxlen=capacity))
 
-    def set_rates(self, pair, description=None):
+    def set_rates(self, pair, description=None, interval=None):
         self.set_text(description=description)
         self.pair = pair
+        if interval:
+            self.interval = interval
         for values, value in zip(self.history, pair or (None, None)):
             values.append(value)
         self.Refresh()
+        self.update_tip()
+
+    def get_spark(self, width, height):
+        left, slot_right, _, _ = self.get_grid(width)
+        return wx.Rect(int(left), int((height - self.SPARK_HEIGHT) / 2), int(slot_right - left),
+                       self.SPARK_HEIGHT + 1)
+
+    def get_scale(self):
+        peaks = [value for values in self.history for value in values if value]
+        return get_rate_scale(max(peaks) if peaks else 0)
+
+    def get_sample(self):
+        spark = self.get_spark(*self.GetClientSize())
+        return find_sample(self.hover, spark.x, spark.width, self.capacity, len(self.history[0]))
+
+    def on_track(self, event):
+        position = event.GetPosition()
+        spark = self.get_spark(*self.GetClientSize()).Inflate(0, 4)
+        hover = position.x if spark.Contains(position) else None
+        if hover != self.hover:
+            self.hover = hover
+            self.Refresh()
+        self.update_tip(self.ClientToScreen(position))
+        event.Skip()
+
+    def on_leave(self, event):
+        if self.hover is not None:
+            self.hover = None
+            self.Refresh()
+            self.update_tip()
+
+    def update_tip(self, point=None):
+        sample = self.get_sample()
+        if sample is None:
+            hide_hover_tip(self)
+            return
+        index, scale = sample[0], self.get_scale()
+        lines = [(format_ago((len(self.history[0]) - 1 - index) * self.interval), 'dim')]
+        for name, values in zip(self.names, self.history):
+            value = values[index]
+            lines.append(('%s  %s' % (name, '—' if value is None else format_rate(value, scale)),
+                          'text'))
+        show_hover_tip(self, self.theme, lines, point)
 
     def draw_control(self, gc, width, height):
         theme = self.theme
         left, slot_right, value_left, right = self.get_grid(width)
-        peaks = [value for values in self.history for value in values if value]
-        scale = get_rate_scale(max(peaks) if peaks else 0)
+        scale = self.get_scale()
         values = ('—', '—') if self.pair is None else tuple(format_rate(value, scale)
                                                             for value in self.pair)
         for index, middle in enumerate((height / 2 - self.LINE_GAP,
@@ -258,20 +362,60 @@ class RateCard(ReadoutCard):
             draw_series(gc, theme, [None if value is None else value / ceiling
                                     for value in values], kind,
                         (left, top, spark_width, self.SPARK_HEIGHT), self.capacity, 1.2)
+        sample = self.get_sample()
+        if sample is not None:
+            fill_rect(gc, theme['tick'], round(sample[1]), top, 1, self.SPARK_HEIGHT)
         return left
 
 
 class CoreCard(ReadoutCard):
 
+    hover = None
+
     def __init__(self, parent, theme, label, description=''):
         super().__init__(parent, theme, label, description)
         self.values = []
+
+    def get_columns(self, width, height):
+        left, slot_right, _, _ = self.get_grid(width)
+        step = (slot_right - left - BAR_HEIGHT) / float(max(1, len(self.values) - 1))
+        return left, step, (height - CORE_HEIGHT) / 2
+
+    def on_track(self, event):
+        width, height = self.GetClientSize()
+        left, step, top = self.get_columns(width, height)
+        x, y = event.GetPosition()
+        index = int(round((x - left - BAR_HEIGHT / 2.0) / step)) if step > 0 else 0
+        inside = (self.values and 0 <= index < len(self.values)
+                  and abs(x - (left + index * step + BAR_HEIGHT / 2.0)) <= max(step, BAR_HEIGHT)
+                  and top - 4 <= y <= top + CORE_HEIGHT + 4)
+        hover = index if inside else None
+        if hover != self.hover:
+            self.hover = hover
+            self.Refresh()
+        self.update_tip(self.ClientToScreen(event.GetPosition()))
+        event.Skip()
+
+    def on_leave(self, event):
+        if self.hover is not None:
+            self.hover = None
+            self.Refresh()
+            self.update_tip()
 
     def set_values(self, values):
         values = [round(value) for value in values]
         if values != self.values:
             self.values = values
             self.Refresh()
+            self.update_tip()
+
+    def update_tip(self, point=None):
+        if self.hover is None or self.hover >= len(self.values):
+            hide_hover_tip(self)
+            return
+        show_hover_tip(self, self.theme, [('Processor %d' % self.hover, 'dim'),
+                                          ('Load  %d%%' % self.values[self.hover], 'text')],
+                       point)
 
     def draw_control(self, gc, width, height):
         theme = self.theme
@@ -279,17 +423,18 @@ class CoreCard(ReadoutCard):
         left, slot_right, _, right = self.get_grid(width)
         if not count:
             return left
-        # the same thickness and round ends as the horizontal meter bars, spread over the slot
-        column, radius = BAR_HEIGHT, BAR_HEIGHT / 2
-        step = (slot_right - left - column) / float(max(1, count - 1))
-        top = (height - CORE_HEIGHT) / 2
+        column = BAR_HEIGHT
+        left, step, top = self.get_columns(width, height)
         for index, value in enumerate(self.values):
             x = left + index * step
-            fill_rect(gc, theme['track'], x, top, column, CORE_HEIGHT, radius)
+            fill_rect(gc, theme['grid'], x, top, column, CORE_HEIGHT, BAR_RADIUS)
             if value > 0:
-                level = max(column, CORE_HEIGHT * min(100, value) / 100.0)
+                level = CORE_HEIGHT * min(100, value) / 100.0
                 colour = theme['warn'] if value >= HIGH * 100 else theme['accent']
-                fill_rect(gc, colour, x, top + CORE_HEIGHT - level, column, level, radius)
+                fill_rect(gc, colour, x, top + CORE_HEIGHT - level, column, level, BAR_RADIUS)
+        if self.hover is not None and self.hover < count:
+            fill_rect(gc, theme['tick'], left + self.hover * step, top + CORE_HEIGHT + 3,
+                      column, 1)
         return left
 
 
@@ -308,13 +453,62 @@ class GraphCard(ReadoutCard):
         self.series = []
         self.span = ''
         self.scale = ''
+        self.interval = 1.0
+        self.hover = None
 
-    def set_series(self, series, span, scale=''):
-        # series: [(name, values 0..1 or None, 'area' or 'line', latest value as text)]
+    def set_series(self, series, span, scale='', interval=None):
+        # series: [(name, values 0..1 or None, 'area' or 'line', latest value as text,
+        # optionally a function that turns one 0..1 value back into its unit)]
         self.series = series
         self.span = span
         self.scale = scale
+        if interval:
+            self.interval = interval
         self.Refresh()
+        self.update_tip()
+
+    def get_plot(self, width, height):
+        left, slot_right, _, _ = self.get_grid(width)
+        return wx.Rect(int(left), GRAPH_PAD, int(slot_right - left), height - GRAPH_PAD * 2)
+
+    def on_track(self, event):
+        position = event.GetPosition()
+        hover = position.x if self.get_plot(*self.GetClientSize()).Contains(position) else None
+        if hover != self.hover:
+            self.hover = hover
+            self.Refresh()
+        self.update_tip(self.ClientToScreen(position))
+        event.Skip()
+
+    def on_leave(self, event):
+        if self.hover is not None:
+            self.hover = None
+            self.Refresh()
+            self.update_tip()
+
+    def get_sample(self, plot):
+        if not self.series:
+            return None
+        return find_sample(self.hover, plot.x, plot.width, self.capacity, len(self.series[0][1]))
+
+    def update_tip(self, point=None):
+        sample = self.get_sample(self.get_plot(*self.GetClientSize()))
+        if sample is None:
+            hide_hover_tip(self)
+            return
+        index, length = sample[0], len(self.series[0][1])
+        lines = [(format_ago((length - 1 - index) * self.interval), 'dim')]
+        for item in self.series:
+            values = item[1]
+            value = values[index] if index < len(values) else None
+            form = item[4] if len(item) > 4 else format_ratio
+            lines.append(('%s  %s' % (item[0], '—' if value is None else form(value)), 'text'))
+        show_hover_tip(self, self.theme, lines, point)
+
+    def draw_hover(self, gc, plot):
+        sample = self.get_sample(plot)
+        if sample is not None:
+            fill_rect(gc, self.theme['tick'], round(sample[1]), plot.y, 1, plot.height)
 
     def draw(self, gc, width, height):
         theme = self.theme
@@ -324,7 +518,7 @@ class GraphCard(ReadoutCard):
 
         middle = height / 2 - (len(self.series) - 1) * LEGEND_LINE / 2
         note = get_font(VALUE_FONT)
-        for index, (name, _, kind, text) in enumerate(self.series):
+        for index, (name, _, kind, text) in enumerate(item[:4] for item in self.series):
             y = middle + index * LEGEND_LINE
             colour = get_series_colour(theme, kind)
             if kind == 'area':
@@ -344,6 +538,7 @@ class GraphCard(ReadoutCard):
             gc.DrawText(self.scale, left + 2, top + 2)
         span_width = get_text_width(get_font(7.5), self.span)
         gc.DrawText(self.span, slot_right - span_width - 2, top + 2)
-        for _, values, kind, _ in self.series:
-            draw_series(gc, theme, values, kind, (left, top, plot_width, plot_height),
+        for item in self.series:
+            draw_series(gc, theme, item[1], item[2], (left, top, plot_width, plot_height),
                         self.capacity)
+        self.draw_hover(gc, self.get_plot(width, height))

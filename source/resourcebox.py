@@ -261,12 +261,13 @@ class ResourceBox(ScrollArea):
             history['power.gpu'].append(gpu_watts)
             values = list(history['power.cpu']) + list(history['power.gpu'])
             ceiling = get_watt_ceiling(max(values + [0]))
+            watts = lambda value: '%.0f W' % (value * ceiling)
             cards['graph.power'].set_series([
                 ('CPU', [value / ceiling for value in history['power.cpu']], 'area',
-                 '%.0f W' % cpu_watts),
+                 '%.0f W' % cpu_watts, watts),
                 ('GPUs', [value / ceiling for value in history['power.gpu']], 'line',
-                 '%.0f W' % gpu_watts)],
-                self.get_span(), '%d W' % ceiling)
+                 '%.0f W' % gpu_watts, watts)],
+                self.get_span(), '%d W' % ceiling, self.interval)
 
     def set_electricity(self, values):
         self.electricity = values
@@ -405,11 +406,11 @@ class ResourceBox(ScrollArea):
                                                    get_power_text(gpu))
 
         for name, pair in data['disks'].items():
-            cards['disk:' + name].set_rates(pair)
+            cards['disk:' + name].set_rates(pair, interval=self.interval)
         addresses = data.get('addresses') or {}
         for name, pair in data['networks'].items():
-            cards['net:' + name].set_rates(pair,
-                                           netinfo.describe(addresses.get(name)))
+            cards['net:' + name].set_rates(pair, netinfo.describe(addresses.get(name)),
+                                           self.interval)
 
         if wsl:
             self.set_wsl(wsl, cpu)
@@ -484,25 +485,26 @@ class ResourceBox(ScrollArea):
             incoming, outgoing = list(history[key + '.in']), list(history[key + '.out'])
             scale = get_rate_scale(max(incoming + outgoing + [0]))
             ceiling = scale[0]
+            rate = lambda value, ceiling=ceiling, scale=scale: format_rate(value * ceiling, scale)
             cards['graph.' + key].set_series([
                 (names[0], [value / ceiling for value in incoming], 'area',
-                 format_rate(incoming[-1], scale)),
+                 format_rate(incoming[-1], scale), rate),
                 (names[1], [value / ceiling for value in outgoing], 'line',
-                 format_rate(outgoing[-1], scale))],
-                span, format_rate(ceiling, scale))
+                 format_rate(outgoing[-1], scale), rate)],
+                span, format_rate(ceiling, scale), self.interval)
         for key, name in (('cpu', 'CPU'), ('memory', 'Memory')):
             series = [(name, list(history[key]), 'area', format_percent(history[key][-1]))]
             if any(value is not None for value in history[key + '.wsl']):
                 series.append(('WSL', list(history[key + '.wsl']), 'line',
                                format_percent(history[key + '.wsl'][-1])))
-            cards['graph.' + key].set_series(series, span)
+            cards['graph.' + key].set_series(series, span, interval=self.interval)
         for gpu in data['gpus']:
             index = gpu['index']
             cards['graph.gpu%d' % index].set_series([
                 ('GPU', list(history['gpu%d' % index]), 'area',
                  format_percent(history['gpu%d' % index][-1])),
                 ('VRAM', list(history['vram%d' % index]), 'line',
-                 format_percent(history['vram%d' % index][-1]))], span)
+                 format_percent(history['vram%d' % index][-1]))], span, interval=self.interval)
 
     def set_wsl(self, wsl, cpu):
         cards, config = self.cards, wsl['config']
@@ -521,8 +523,8 @@ class ResourceBox(ScrollArea):
         else:
             cards['wsl.memory'].set_value(None, '%s on Windows' % format_bytes(
                 wsl.get('host_memory')))
-        cards['wsl.disk'].set_rates(wsl.get('disk'))
-        cards['wsl.network'].set_rates(wsl.get('network'))
+        cards['wsl.disk'].set_rates(wsl.get('disk'), interval=self.interval)
+        cards['wsl.network'].set_rates(wsl.get('network'), interval=self.interval)
 
     def tick(self):
         pass
