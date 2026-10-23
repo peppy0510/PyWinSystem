@@ -268,6 +268,16 @@ def get_font(size, bold=False):
 
 INKS = {}
 WIDTHS = {}
+FONT_KEYS = {}
+
+
+def get_font_key(font):
+    # GetNativeFontInfoDesc builds a long string on every call; the font is kept so its id
+    # cannot be handed to another font
+    key = FONT_KEYS.get(id(font))
+    if key is None:
+        key = FONT_KEYS[id(font)] = (font, font.GetNativeFontInfoDesc())
+    return key[1]
 
 
 def get_luma(image, x, y):
@@ -276,7 +286,7 @@ def get_luma(image, x, y):
 
 
 def get_ink(font):
-    key = font.GetNativeFontInfoDesc()
+    key = get_font_key(font)
     if key not in INKS:
         bitmap = wx.Bitmap(80, 80, 24)
         dc = wx.MemoryDC(bitmap)
@@ -294,7 +304,7 @@ def get_ink(font):
 
 
 def get_text_width(font, text):
-    key = (font.GetNativeFontInfoDesc(), text)
+    key = (get_font_key(font), text)
     if key not in WIDTHS:
         dc = wx.MemoryDC(wx.Bitmap(1, 1))
         gc = wx.GraphicsContext.Create(dc)
@@ -310,7 +320,7 @@ SPANS = {}
 
 def get_ink_span(font, text, colour='#ffffff', back='#000000'):
     # GDI+ extents pad the right side (2-3 px measured), so centre on the ink
-    key = (font.GetNativeFontInfoDesc(), text, colour, back)
+    key = (get_font_key(font), text, colour, back)
     if key not in SPANS:
         width = get_text_width(font, text) + 40
         fore, ground = wx.Colour(colour), wx.Colour(back)

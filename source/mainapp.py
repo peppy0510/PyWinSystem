@@ -68,6 +68,7 @@ class SamplerThread(threading.Thread):
         self.sampler = Sampler()
         self.table = processes.ProcessTable()
         self.listing = False
+        self.detailed = True
         self.interval = 1.0
         self.running = True
         self.visible = True
@@ -90,7 +91,7 @@ class SamplerThread(threading.Thread):
                 except Exception:
                     pass
             try:
-                data = self.sampler.sample()
+                data = self.sampler.sample(self.detailed)
                 call_painted(self.frame, self.frame.on_sample, data)
             except Exception:
                 continue
@@ -204,6 +205,7 @@ class MainFrame(wx.Frame):
         listing = self.book.GetPage(index) is self.processbox
         self.processbox.set_active(listing)
         self.sampler.listing = listing
+        self.sampler.detailed = self.book.GetPage(index) is self.resourcebox
 
     def toggle_maximize(self):
         # Windows maximizes a captionless frame past the work area and over the taskbar
@@ -261,6 +263,7 @@ class MainFrame(wx.Frame):
         elif not values['tray_icon'] and self.tray is not None:
             self.remove_tray()
         self.resourcebox.set_interval(values['interval'])
+        self.processbox.set_interval(values['interval'])
         self.resourcebox.set_electricity(values)
         self.store_settings()
 
@@ -323,6 +326,8 @@ class MainFrame(wx.Frame):
             self.sampler.visible = False
             return
         self.sampler.running = False
+        # the WSL helpers would keep their distros awake
+        self.processbox.close()
         # the drawer's capture and slide timer crash a closing frame (0xc0000374)
         self.sidemenu.close()
         self.sidemenu.timer.Stop()

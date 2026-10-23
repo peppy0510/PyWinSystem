@@ -15,6 +15,7 @@ import winreg
 import psutil
 
 import netinfo
+import processes
 
 from sensors import Sensors
 
@@ -24,6 +25,9 @@ WSL_CONFIG = os.path.join(os.path.expanduser('~'), '.wslconfig')
 LXSS_KEY = r'Software\Microsoft\Windows\CurrentVersion\Lxss'
 WSL_DISK = re.compile(r'^(sd[a-z]+|vd[a-z]+|nvme\d+n\d+)$')
 SECTOR = 512
+# adapters and their addresses change rarely and take ~45 ms to ask for
+NETWORK_REFRESH = 10.0
+TICKS = 10 ** 7
 
 
 def parse_size(text):
@@ -127,37 +131,45 @@ class Wsl:
     def __init__(self):
         self.config = read_wsl_config()
         self.distro = get_default_distro()
-        self.process = None
         self.rates = Rates()
+        self.table = processes.ProcessTable()
+        self.cpus = psutil.cpu_count() or 1
+        self.last = None
 
-    def find_process(self):
-        # \\wsl.localhost is touched only while the VM runs; touching it starts a stopped WSL
-        if self.process is not None and self.process.is_running():
-            return self.process
-        self.process = None
-        for process in psutil.process_iter(['name']):
-            if (process.info['name'] or '').lower() == WSL_PROCESS:
-                self.process = process
-                process.cpu_percent(None)
-                break
-        return self.process
+    def find_host(self, now):
+        # psutil reads the protected vmmemWSL through a slow fallback (~11 ms a call); the
+        # process table answers for every process at once
+        host = next((row for row in self.table.read()
+                     if row['name'].lower() == WSL_PROCESS), None)
+        if host is None:
+            self.last = None
+            return None
+        last, self.last = self.last, (processes.get_key(host), host['time'], now)
+        if last is None or last[0] != self.last[0] or now <= last[2]:
+            host['cpu'] = 0.0
+        else:
+            host['cpu'] = (host['time'] - last[1]) * 100.0 / ((now - last[2]) * TICKS * self.cpus)
+        return host
 
     def read_proc(self, name):
         path = r'\\wsl.localhost\%s\proc\%s' % (self.distro, name.replace('/', '\\'))
         with open(path, encoding='utf-8', errors='replace') as file:
             return file.read()
 
-    def sample(self, now):
-        process = self.find_process()
-        if process is None:
+    def sample(self, now, detailed=True):
+        # \\wsl.localhost is touched only while the VM runs; touching it starts a stopped WSL
+        host = self.find_host(now)
+        if host is None:
             return None
-        wsl = {'config': self.config, 'distro': self.distro}
-        try:
-            wsl['host_memory'] = process.memory_info().rss
-            wsl['host_cpu'] = process.cpu_percent(None) / psutil.cpu_count()
-        except psutil.Error:
-            self.process = None
-            return None
+        wsl = {'config': self.config, 'distro': self.distro,
+               'host_memory': host['working_set'], 'host_cpu': host['cpu']}
+        # the inside figures cost ~30 ms over 9P and only the WSL rows show them; the graphs
+        # use the host figures above
+        if not detailed:
+            self.rates = Rates()
+            return wsl
+        self.distro = get_default_distro()
+        wsl['distro'] = self.distro
         if self.distro:
             for read in (self.read_memory, self.read_cpu, self.read_disk, self.read_network):
                 try:
@@ -210,10 +222,12 @@ class Sampler:
         self.rates = Rates()
         self.gpus = Gpus()
         self.wsl = Wsl()
+        self.network_read = -NETWORK_REFRESH
+        self.stats, self.addresses = {}, {}
         self.sensors = Sensors()
         psutil.cpu_percent(None, percpu=True)
 
-    def sample(self):
+    def sample(self, detailed=True):
         now = time.monotonic()
         cores = psutil.cpu_percent(None, percpu=True)
         memory = psutil.virtual_memory()
@@ -233,7 +247,10 @@ class Sampler:
                                                       counters.write_bytes), now)
             data['disks'][name] = rate or (0, 0)
 
-        stats = psutil.net_if_stats()
+        if now - self.network_read >= NETWORK_REFRESH:
+            self.stats, self.addresses = psutil.net_if_stats(), netinfo.get_addresses()
+            self.network_read = now
+        stats = self.stats
         for name, counters in sorted(psutil.net_io_counters(pernic=True).items()):
             if 'loopback' in name.lower() or not getattr(stats.get(name), 'isup', False):
                 continue
@@ -241,7 +258,7 @@ class Sampler:
                                                      counters.bytes_sent), now)
             data['networks'][name] = rate or (0, 0)
 
-        data['addresses'] = netinfo.get_addresses()
+        data['addresses'] = self.addresses
         data['sensors'] = self.sensors.sample()
-        data['wsl'] = self.wsl.sample(now)
+        data['wsl'] = self.wsl.sample(now, detailed)
         return data

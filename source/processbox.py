@@ -16,6 +16,7 @@ import psutil
 
 import processes
 import winuac
+import wslprocesses
 
 from controls import ScrollBar
 from controls import draw_button
@@ -35,6 +36,7 @@ from utilities import apply_clip_siblings
 from utilities import draw_chevron
 from utilities import fill_rect
 from utilities import get_font
+from utilities import get_font_key
 from utilities import get_ink
 from utilities import get_text_top
 from utilities import get_text_width
@@ -85,7 +87,7 @@ CAPTIONS = {'open': 'Open location', 'path': 'Copy path', 'command': 'Copy comma
 COPIED = 'Copied'
 HINT = 'Name, PID or path'
 KINDS = (('all', 'All'), ('apps', 'Apps'), ('background', 'Background'),
-         ('windows', 'Windows'))
+         ('windows', 'Windows'), ('wsl', 'WSL'))
 USAGES = (('any', 'Any use'), ('cpu', 'CPU ≥ 1%'), ('memory', 'Memory ≥ 100 MB'),
           ('large', 'Memory ≥ 1 GB'))
 USAGE_TESTS = {'any': lambda row: True,
@@ -123,12 +125,16 @@ class ProcessList(Canvas):
 
     def __init__(self, parent, theme, state, on_scroll, on_change=None, on_quit=None):
         super().__init__(parent, theme)
+        # composited painting redraws the whole list on every caret blink of the search box;
+        # the paint is already buffered
+        self.SetDoubleBuffered(False)
         self.on_scroll = on_scroll
         self.on_change = on_change
         self.on_quit = on_quit
         self.table = processes.ProcessTable()
         self.paths = processes.ImagePaths()
         self.images = {}
+        self.wsl = wslprocesses.WslProcesses()
         self.cpus = psutil.cpu_count() or 1
         self.admin = winuac.is_admin()
         self.rows = []
@@ -139,6 +145,9 @@ class ProcessList(Canvas):
         self.descending = bool(state.get('descending', self.sort != 'name'))
         self.kind = state.get('kind') if state.get('kind') in dict(KINDS) else 'all'
         self.usage = state.get('usage') if state.get('usage') in dict(USAGES) else 'any'
+        # a remembered distro that is not running shows every distro until it runs again
+        self.distro = state.get('distro') or 'all'
+        self.distros = []
         self.matched = 0
         self.view = state.get('view') if state.get('view') in dict(VIEWS) else 'list'
         self.filter = ''
@@ -160,6 +169,7 @@ class ProcessList(Canvas):
         self.hovered = None
         self.pressed = None
         self.wraps = {}
+        self.fits = {}
         self.measure = None
         self.chips = []
         self.field = wx.TextCtrl(self, style=wx.BORDER_NONE)
@@ -181,6 +191,9 @@ class ProcessList(Canvas):
         self.Bind(wx.EVT_KEY_DOWN, self.on_key_down)
         self.Bind(wx.EVT_SIZE, self.on_size)
 
+    wsl_host = None
+    wsl_by_pid = {}
+
     def read_now(self):
         self.times, self.sampled = {}, None
         self.set_rows(self.table.read(), time.monotonic())
@@ -201,7 +214,20 @@ class ProcessList(Canvas):
             row['path'] = self.images[key] if key in self.images else self.paths.read(row['pid'])
         self.times, self.sampled = times, now
         self.images = {row['key']: row['path'] for row in rows}
-        self.rows = rows
+        # Linux processes sit under vmmemWSL, the one Windows process WSL shows
+        host = next((row for row in rows if row['name'].lower() == wslprocesses.HOST), None)
+        self.wsl.update(host is not None)
+        linux = self.wsl.get_rows() if host is not None else []
+        self.wsl_host = host
+        self.wsl_by_pid = {(row['wsl'], row['pid']): row for row in linux}
+        for row in linux:
+            row['kind'] = 'wsl'
+            times[row['key']] = None
+        distros = sorted({row['wsl'] for row in linux})
+        if distros != self.distros:
+            self.distros = distros
+            self.layout_header(self.GetClientSize()[0])
+            self.Refresh()
         self.by_pid = {row['pid']: row for row in rows}
         windowed = processes.get_window_pids()
         hosts = [row for row in rows if row['name'].lower() == CONSOLE_HOST]
@@ -212,6 +238,7 @@ class ProcessList(Canvas):
             parent = self.get_parent(row)
             row['kind'] = parent['kind'] if parent is not None and 'kind' in parent \
                 else self.get_kind(row, windowed)
+        rows = self.rows = rows + linux
         self.set_hints(rows, hosts)
         self.expanded &= set(times)
         self.folded &= set(times)
@@ -223,6 +250,12 @@ class ProcessList(Canvas):
             self.relayout()
 
     def get_parent(self, row):
+        if row.get('wsl'):
+            # each distro numbers its own processes; its first ones hang under vmmemWSL
+            parent = self.wsl_by_pid.get((row['wsl'], row['ppid']))
+            if parent is None or parent is row or parent['created'] > row['created']:
+                return self.wsl_host
+            return parent
         # a reused PID can point at a younger process that is not the parent
         parent = self.by_pid.get(row['ppid'])
         if parent is None or parent is row or parent['created'] > row['created']:
@@ -255,6 +288,14 @@ class ProcessList(Canvas):
         if fresh:
             self.services = processes.read_services()
         for row in fresh:
+            if row.get('wsl'):
+                hint = ''
+                if processes.needs_summary(row['name']):
+                    hint = processes.summarize_args(row['command'].split())
+                if self.get_parent(row) is self.wsl_host:
+                    hint = row['wsl'] + (' · ' + hint if hint else '')
+                hints[row['key']] = hint
+                continue
             if row['name'].lower() == CONSOLE_HOST:
                 continue
             hint = ''
@@ -282,7 +323,9 @@ class ProcessList(Canvas):
 
     def matches(self, row, needle):
         return (needle in row['name'].lower() or str(row['pid']).startswith(needle)
-                or needle in (row['path'] or '').lower() or needle in row['hint'].lower())
+                or needle in (row['path'] or '').lower() or needle in row['hint'].lower()
+                or needle in row.get('command', '').lower()
+                or needle in (row.get('wsl') or '').lower())
 
     def sort_rows(self, rows):
         if self.sort == 'name':
@@ -297,8 +340,10 @@ class ProcessList(Canvas):
     def get_shown(self):
         needle = self.filter.lower()
         test = USAGE_TESTS[self.usage]
+        distro = self.get_distro()
         passing = {row['key'] for row in self.rows
                    if (self.kind == 'all' or row['kind'] == self.kind) and test(row)
+                   and (distro is None or row.get('wsl') == distro)
                    and (not needle or self.matches(row, needle))}
         self.matched = len(passing)
         for row in self.rows:
@@ -332,18 +377,19 @@ class ProcessList(Canvas):
             seen.add(key)
             kids = [kid for kid in children.get(key, []) if keep is None or kid['key'] in keep]
             row['context'] = key not in passing
-            row['branch'] = bool(kids) and keep is None
+            row['branch'] = bool(kids)
             if row['branch'] and key in self.folded:
-                row['inside'] = self.count_inside(key, children)
+                row['inside'] = self.count_inside(key, children, keep)
                 kids = []
             shown.append((row, depth))
             stack.extend((kid, depth + 1) for kid in reversed(self.sort_rows(kids)))
         return shown
 
-    def count_inside(self, key, children):
+    def count_inside(self, key, children, keep=None):
         count, stack = 0, [key]
         while stack:
-            kids = children.get(stack.pop(), [])
+            kids = [kid for kid in children.get(stack.pop(), [])
+                    if keep is None or kid['key'] in keep]
             count += len(kids)
             stack.extend(kid['key'] for kid in kids)
         return count
@@ -389,7 +435,9 @@ class ProcessList(Canvas):
         if key in self.wraps:
             return self.wraps[key]
         gc = self.get_measure()
-        fits = lambda part: gc.GetTextExtent(part)[0] <= limit
+
+        def fits(part):
+            return gc.GetTextExtent(part)[0] <= limit
         # each line keeps where it starts in the text, so a selection copies the original
         lines, rest, start = [], text, 0
         while rest and len(lines) < most:
@@ -423,14 +471,46 @@ class ProcessList(Canvas):
         self.wraps[key] = lines or [('', 0, 0, False)]
         return self.wraps[key]
 
+    def fit(self, gc, font, text, limit):
+        # a long name or hint was cut one letter per measurement on every paint
+        key = (get_font_key(font), text, int(limit))
+        if key not in self.fits:
+            if len(self.fits) > 4000:
+                self.fits.clear()
+            if get_text_width(font, text) <= limit:
+                self.fits[key] = text
+            else:
+                low, high = 0, len(text)
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if gc.GetTextExtent(text[:middle] + '…')[0] <= limit:
+                        low = middle
+                    else:
+                        high = middle - 1
+                self.fits[key] = text[:low] + '…'
+        return self.fits[key]
+
     def get_parent_text(self, row):
         parent = self.get_parent(row)
         if parent is not None:
-            return '%s · PID %d' % (parent['name'], parent['pid'])
+            return '%s · %s' % (parent['name'], self.get_pid_text(parent))
         return 'PID %d · exited' % row['ppid'] if row['ppid'] else MISSING
+
+    @staticmethod
+    def get_pid_text(row):
+        return ('WSL %d' if row.get('wsl') else 'PID %d') % row['pid']
 
     def get_detail(self, row, width):
         details = self.details.get(row['key']) or {}
+        if row.get('wsl'):
+            fields = [('Distro', row['wsl'], 1),
+                      ('Command line', row['command'], MAX_COMMAND_LINES),
+                      ('User', row['user'] or MISSING, 1),
+                      ('Parent', self.get_parent_text(row), 1),
+                      ('Started', row['started'].strftime('%Y-%m-%d %H:%M:%S'), 1),
+                      ('State', '%s · %d threads' % (row['state'], row['threads']), 1),
+                      ('Memory', 'Resident %s' % format_bytes(row['memory']), 1)]
+            return self.lay_detail(fields, ['command'], width, {'command': row['command']})
         command = details.get('cmdline')
         command = processes.join_cmdline(command) if command else command
         started = processes.get_start_time(row['created'])
@@ -455,14 +535,6 @@ class ProcessList(Canvas):
         if row['name'].lower() == CONSOLE_HOST and parent is not None:
             fields.insert(2, ('Console of', describe(self.read_command(parent)),
                               MAX_COMMAND_LINES))
-        limit = max(40, width - PANEL_PAD - VALUE_LEFT)
-        lines, top = [], DETAIL_TOP
-        for label, text, most in fields:
-            spans = self.wrap(text, limit, most)
-            lines.append((label, spans, text, top))
-            top += len(spans) * LINE_HEIGHT
-        top += DETAIL_GAP
-
         names = []
         if isinstance(details.get('exe'), str):
             names += ['open', 'path']
@@ -471,6 +543,16 @@ class ProcessList(Canvas):
         if not self.admin and False in (details.get('exe'), details.get('cmdline'),
                                         details.get('cwd')):
             names.append('admin')
+        return self.lay_detail(fields, names, width, details)
+
+    def lay_detail(self, fields, names, width, details):
+        limit = max(40, width - PANEL_PAD - VALUE_LEFT)
+        lines, top = [], DETAIL_TOP
+        for label, text, most in fields:
+            spans = self.wrap(text, limit, most)
+            lines.append((label, spans, text, top))
+            top += len(spans) * LINE_HEIGHT
+        top += DETAIL_GAP
         buttons, left = [], NAME_LEFT
         for name in names:
             button_width = get_button_width(CAPTIONS[name])
@@ -499,7 +581,11 @@ class ProcessList(Canvas):
         self.clear_rect = wx.Rect(self.field_rect.x + self.field_rect.width - CLEAR_SIZE - 2,
                                   top + (FIELD_HEIGHT - CLEAR_SIZE) // 2, CLEAR_SIZE, CLEAR_SIZE)
         y = top + FIELD_HEIGHT + FILTER_GAP
-        for group, options in (('kind', KINDS), ('usage', USAGES)):
+        groups = [('kind', KINDS), ('usage', USAGES)]
+        if self.kind == 'wsl' and len(self.distros) > 1:
+            groups.append(('distro', [('all', 'All distros')] +
+                           [(name, name) for name in self.distros]))
+        for group, options in groups:
             left = PANEL_PAD
             for value, caption in options:
                 chip_width = get_button_width(caption)
@@ -519,7 +605,12 @@ class ProcessList(Canvas):
 
     def get_state(self):
         return {'sort': self.sort, 'descending': self.descending, 'kind': self.kind,
-                'usage': self.usage, 'view': self.view}
+                'usage': self.usage, 'view': self.view, 'distro': self.distro}
+
+    def get_distro(self):
+        if self.kind == 'wsl' and self.distro in self.distros and len(self.distros) > 1:
+            return self.distro
+        return None
 
     def is_filtered(self):
         return bool(self.filter) or self.kind != 'all' or self.usage != 'any'
@@ -782,6 +873,8 @@ class ProcessList(Canvas):
             if getattr(self, key) != target[2]:
                 setattr(self, key, target[2])
                 self.offset = 0
+                if key == 'kind':
+                    self.layout_header(self.GetClientSize()[0])
                 self.relayout()
                 self.notify()
         elif kind == 'sort':
@@ -802,7 +895,8 @@ class ProcessList(Canvas):
                 self.expanded.discard(key)
             else:
                 self.expanded.add(key)
-                self.details[key] = processes.read_details(key[0])
+                if key[0] != 'wsl':
+                    self.details[key] = processes.read_details(key[0])
             self.relayout()
         elif kind == 'button':
             self.press(key, target[2])
@@ -816,8 +910,12 @@ class ProcessList(Canvas):
             if winuac.relaunch_as_admin(script, os.getpid()) and self.on_quit:
                 self.on_quit()
         else:
-            text = details.get('exe') if name == 'path' else processes.join_cmdline(
-                details.get('cmdline'))
+            item = self.items[self.positions[key]] if key in self.positions else None
+            if item is not None and item[2].get('wsl'):
+                text = item[2]['command']
+            else:
+                text = details.get('exe') if name == 'path' else processes.join_cmdline(
+                    details.get('cmdline'))
             if text and self.put_clipboard(text):
                 copied = self.copied = (key, name)
                 wx.CallLater(COPIED_MS, self.clear_copied, copied)
@@ -854,9 +952,10 @@ class ProcessList(Canvas):
 
     def get_subtitle(self):
         total = len(self.rows)
-        if not self.is_filtered():
-            return '%d running' % total
-        return '%d of %d' % (self.matched, total)
+        linux = sum(1 for row in self.rows if row.get('wsl'))
+        text = '%d running' % total if not self.is_filtered() else \
+            '%d of %d' % (self.matched, total)
+        return text + (' · %d in WSL' % linux if linux else '')
 
     def draw(self, gc, width, height):
         theme = self.theme
@@ -915,14 +1014,14 @@ class ProcessList(Canvas):
         name_left = self.get_name_left(row, width)
         name_top = get_text_top(name_font, y, ROW_HEIGHT)
         note_top = name_top + get_ink(name_font)[1] - get_ink(note_font)[1]
-        pid = 'PID %d' % row['pid']
+        pid = self.get_pid_text(row)
         pid_right = cpu_left - COLUMN_GAP
         pid_left = pid_right - get_text_width(note_font, pid)
         gc.SetFont(note_font, wx.Colour(theme['dim']))
         gc.DrawText(pid, pid_left, note_top)
         room = max(0, pid_left - PID_GAP * 2 - name_left)
         gc.SetFont(name_font, wx.Colour(theme['dim' if row['context'] else 'text']))
-        name = self.fit_text(gc, row['name'], room)
+        name = self.fit(gc, name_font, row['name'], room)
         gc.DrawText(name, name_left, name_top)
         note = row['hint']
         if row['inside']:
@@ -930,7 +1029,7 @@ class ProcessList(Canvas):
         used = get_text_width(name_font, name) + PID_GAP
         if note and room - used >= HINT_MIN:
             gc.SetFont(note_font, wx.Colour(theme['dim']))
-            gc.DrawText(self.fit_text(gc, note, room - used), name_left + used, note_top)
+            gc.DrawText(self.fit(gc, note_font, note, room - used), name_left + used, note_top)
 
         if open_:
             self.draw_detail(gc, width, y + ROW_HEIGHT, key, detail)
@@ -1041,7 +1140,6 @@ class ProcessList(Canvas):
                     else left - 4 - MARK_SIZE / 2
                 draw_sort_mark(gc, mark, middle, self.descending, theme['accent'])
 
-
     def draw_filters(self, gc, width):
         theme = self.theme
         rect = self.field_rect
@@ -1085,6 +1183,15 @@ class ProcessBox(wx.Panel):
         if active:
             self.list.read_now()
             self.list.field.SetFocus()
+        else:
+            self.list.wsl.stop()
+
+    def set_interval(self, interval):
+        self.list.wsl.set_interval(interval)
+
+    def close(self):
+        self.active = False
+        self.list.wsl.stop()
 
     def set_rows(self, rows, now):
         if self.active:
