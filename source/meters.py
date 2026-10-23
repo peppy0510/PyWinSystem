@@ -263,13 +263,21 @@ class MeterCard(ReadoutCard):
         bar_width = slot_right - left
         top = (height - BAR_HEIGHT) / 2
         fill_rect(gc, theme['grid'], left, top, bar_width, BAR_HEIGHT, BAR_RADIUS)
-        if value:
-            fill_rect(gc, theme['warn'] if high else theme['accent'], left, top,
-                      bar_width * value, BAR_HEIGHT, BAR_RADIUS)
+        fill = theme['warn'] if high else theme['accent']
+        # whole pixels: a gap on a fractional x smears into a grey 2 px band and back as the
+        # value moves
+        start = round(left)
+        end = round(left + bar_width * value) if value else start
+        if end > start:
+            fill_rect(gc, fill, start, top, end - start, BAR_HEIGHT, BAR_RADIUS)
         if value and self.share:
-            share = max(0.0, min(value, self.share))
-            fill_rect(gc, mix(theme['accent'], theme['text'], 0.55), left, top,
-                      bar_width * share, BAR_HEIGHT, BAR_RADIUS)
+            share = round(left + bar_width * max(0.0, min(value, self.share)))
+            if share > start:
+                fill_rect(gc, mix(fill, theme['text'], 0.55), start, top, share - start,
+                          BAR_HEIGHT, BAR_RADIUS)
+            # the two blues are close; a gap marks where the share ends
+            if start < share < end - 1:
+                fill_rect(gc, theme['face'], share, top, 1, BAR_HEIGHT)
         return left
 
 
