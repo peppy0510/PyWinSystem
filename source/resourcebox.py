@@ -261,7 +261,9 @@ class ResourceBox(ScrollArea):
             history['power.gpu'].append(gpu_watts)
             values = list(history['power.cpu']) + list(history['power.gpu'])
             ceiling = get_watt_ceiling(max(values + [0]))
-            watts = lambda value: '%.0f W' % (value * ceiling)
+
+            def watts(value):
+                return '%.0f W' % (value * ceiling)
             cards['graph.power'].set_series([
                 ('CPU', [value / ceiling for value in history['power.cpu']], 'area',
                  '%.0f W' % cpu_watts, watts),
@@ -485,7 +487,9 @@ class ResourceBox(ScrollArea):
             incoming, outgoing = list(history[key + '.in']), list(history[key + '.out'])
             scale = get_rate_scale(max(incoming + outgoing + [0]))
             ceiling = scale[0]
-            rate = lambda value, ceiling=ceiling, scale=scale: format_rate(value * ceiling, scale)
+
+            def rate(value, ceiling=ceiling, scale=scale):
+                return format_rate(value * ceiling, scale)
             cards['graph.' + key].set_series([
                 (names[0], [value / ceiling for value in incoming], 'area',
                  format_rate(incoming[-1], scale), rate),
