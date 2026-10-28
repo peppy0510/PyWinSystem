@@ -120,9 +120,11 @@ class ResourceBox(ScrollArea):
         board, theme = self.content, self.theme
         cards = self.cards = {}
         self.headers = []
-        # a folded panel shows its graph in the header; with several GPUs, the first one's
-        self.summaries = {'sensors': 'graph.power', 'cpu': 'graph.cpu', 'memory': 'graph.memory',
-                          'disk': 'graph.disk', 'network': 'graph.network'}
+        # a folded panel shows its graph in the header (System, the host name); with several
+        # GPUs, the first one's
+        self.summaries = {'system': 'host', 'sensors': 'graph.power', 'electricity': 'graph.wall',
+                          'cpu': 'graph.cpu', 'memory': 'graph.memory', 'disk': 'graph.disk',
+                          'network': 'graph.network'}
         if data['gpus']:
             self.summaries['gpu'] = 'graph.gpu%d' % data['gpus'][0]['index']
         wsl = data['wsl']
@@ -154,7 +156,8 @@ class ResourceBox(ScrollArea):
             for key, label in keys:
                 cards[key] = ValueCard(board, theme, label)
             panels.append(self.add_panel('electricity', 'Electricity',
-                                         [cards[key] for key, _ in keys],
+                                         [cards[key] for key, _ in keys]
+                                         + [graph('graph.wall', 'Wall power over time')],
                                          'Drives, monitors and the rest are estimates'))
 
         body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
@@ -362,6 +365,15 @@ class ResourceBox(ScrollArea):
         month_cost = energy.get_share(monthly, household, tariff, month)
         cards['cost.wall'].set_value('%.0f W' % wall, 'The case at %.0f%% efficiency, '
                                      'plus the monitors' % efficiency)
+        history = self.history['power.wall']
+        history.append(wall)
+        ceiling = get_watt_ceiling(max(history))
+
+        def watts(value):
+            return '%.0f W' % (value * ceiling)
+        cards['graph.wall'].set_series([
+            ('Wall', [value / ceiling for value in history], 'area', '%.0f W' % wall, watts)],
+            self.get_span(), '%d W' % ceiling, self.interval)
         cards['cost.rate'].set_value(money(month_cost / (24 * energy.DAYS_PER_MONTH)) + ' / h',
                                      'Day %s · month %s · %s' % (
                                          money(month_cost / energy.DAYS_PER_MONTH),

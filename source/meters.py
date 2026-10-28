@@ -211,6 +211,9 @@ class ValueCard(ReadoutCard):
         # no picture here, so a long label may run into the empty slot
         return right - drawn
 
+    def draw_summary(self, gc, width, height):
+        return self.draw_control(gc, width, height) if self.value else None
+
 
 class MeterCard(ReadoutCard):
 
