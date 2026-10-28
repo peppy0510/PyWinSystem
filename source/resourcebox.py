@@ -8,6 +8,7 @@ email: peppy0510@hotmail.com
 
 
 import collections
+import functools
 import os
 import platform
 import socket
@@ -74,6 +75,8 @@ class ResourceBox(ScrollArea):
         self.on_folds = on_fold
         self.layout_key = None
         self.cards = {}
+        self.headers = []
+        self.summaries = {}
         self.disk_names = {}
         self.history = collections.defaultdict(lambda: collections.deque(maxlen=HISTORY))
         self.interval = 1.0
@@ -101,14 +104,27 @@ class ResourceBox(ScrollArea):
                                                    for item in monitor))
 
     def add_panel(self, key, title, body, subtitle=''):
-        return Panel(self.content, self.theme, 'resources.' + key, title, body, self.folds,
-                     self.on_fold, subtitle=subtitle)
+        panel = Panel(self.content, self.theme, 'resources.' + key, title, body, self.folds,
+                      self.on_fold, subtitle=subtitle)
+        panel.header.summary = functools.partial(self.draw_summary, key)
+        self.headers.append(panel.header)
+        return panel
+
+    def draw_summary(self, key, gc, width, height):
+        card = self.cards.get(self.summaries.get(key))
+        return card.draw_summary(gc, width, height) if card else None
 
     def build(self, data):
         for child in list(self.content.GetChildren()):
             child.Destroy()
         board, theme = self.content, self.theme
         cards = self.cards = {}
+        self.headers = []
+        # a folded panel shows its graph in the header; with several GPUs, the first one's
+        self.summaries = {'sensors': 'graph.power', 'cpu': 'graph.cpu', 'memory': 'graph.memory',
+                          'disk': 'graph.disk', 'network': 'graph.network'}
+        if data['gpus']:
+            self.summaries['gpu'] = 'graph.gpu%d' % data['gpus'][0]['index']
         wsl = data['wsl']
         panels = []
 
@@ -419,6 +435,9 @@ class ResourceBox(ScrollArea):
         self.set_history(data)
         self.set_sensors(data)
         self.set_cost(data)
+        for header in self.headers:
+            if header.folded:
+                header.Refresh()
 
     def get_public_text(self):
         if self.public_ip:

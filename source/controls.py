@@ -327,12 +327,18 @@ class PanelHeader(Pressable):
     SPACE = 6
     RIGHT = 8
     SUB_GAP = 8
+    SUMMARY_GAP = 12
+
+    # summary(gc, width, height) draws a folded panel's contents in place of the subtitle and
+    # returns the left edge it took, or None when it drew nothing
+    summary = None
 
     def __init__(self, parent, theme, title, subtitle, on_toggle):
         super().__init__(parent, theme, on_toggle)
         self.title = title.upper()
         self.subtitle = subtitle
         self.folded = False
+        self.edge = None
         self.SetToolTip('Fold')
         self.update_height()
 
@@ -357,7 +363,8 @@ class PanelHeader(Pressable):
         width = self.GetClientSize()[0]
         right = self.get_title_left() + get_text_width(get_font(self.TITLE_SIZE, True),
                                                        self.title) + self.RIGHT
-        return wx.Rect(BAND_INSET, BAND_INSET, max(0, min(right, width - BAND_INSET) - BAND_INSET),
+        limit = width - BAND_INSET if self.edge is None else self.edge
+        return wx.Rect(BAND_INSET, BAND_INSET, max(0, min(right, limit) - BAND_INSET),
                        BUTTON_HEIGHT)
 
     def draw(self, gc, width, height):
@@ -368,6 +375,9 @@ class PanelHeader(Pressable):
             fill_rect(gc, theme['rim'], 0, HEADER_BAND, width, 1)
         fill_rect(gc, theme['accent'], 0, 6, 2, HEADER_BAND - 12, 1)
 
+        summing = self.folded and self.summary is not None
+        edge = self.summary(gc, width, HEADER_BAND) if summing else None
+        self.edge = None if edge is None else edge - self.SUMMARY_GAP
         hit = self.get_hit()
         if self.pressed:
             fill_rect(gc, theme['control_down'], hit.x, hit.y, hit.width, hit.height, PANEL_RADIUS)
@@ -380,12 +390,13 @@ class PanelHeader(Pressable):
 
         font = get_font(self.TITLE_SIZE, True)
         left = self.get_title_left()
-        limit = max(0, width - left - PANEL_PAD)
+        right = width - PANEL_PAD if self.edge is None else self.edge
         gc.SetFont(font, wx.Colour(theme['text']))
-        title = self.fit_text(gc, self.title, limit)
+        title = self.fit_text(gc, self.title, max(0, right - left))
         title_top = get_text_top(font, 0, HEADER_BAND)
         gc.DrawText(title, left, title_top)
-        if self.subtitle:
+        # the subtitle explains the rows, so a summing header shows it only while they show
+        if self.subtitle and not summing:
             sub_font = get_font(8)
             sub_left = hit.x + hit.width + self.SUB_GAP
             room = width - sub_left - PANEL_PAD

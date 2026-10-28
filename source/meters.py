@@ -450,6 +450,8 @@ GRAPH_HEIGHT = 100
 GRAPH_PAD = 12
 LEGEND_SWATCH = 10
 LEGEND_LINE = 18
+SUMMARY_PAD = 6
+SUMMARY_LINE = 12
 
 
 class GraphCard(ReadoutCard):
@@ -518,16 +520,12 @@ class GraphCard(ReadoutCard):
         if sample is not None:
             fill_rect(gc, self.theme['tick'], round(sample[1]), plot.y, 1, plot.height)
 
-    def draw(self, gc, width, height):
+    def draw_legend(self, gc, value_left, right, height, line):
         theme = self.theme
-        draw_row_face(gc, theme, width, height, self.first, self.last)
-        left, slot_right, value_left, right = self.get_grid(width)
-        self.draw_label(gc, height, left - self.PADDING - self.LABEL_GAP)
-
-        middle = height / 2 - (len(self.series) - 1) * LEGEND_LINE / 2
+        middle = height / 2 - (len(self.series) - 1) * line / 2
         note = get_font(VALUE_FONT)
         for index, (name, _, kind, text) in enumerate(item[:4] for item in self.series):
-            y = middle + index * LEGEND_LINE
+            y = middle + index * line
             colour = get_series_colour(theme, kind)
             if kind == 'area':
                 fill_rect(gc, colour, value_left, y - 3, LEGEND_SWATCH, 7, 1)
@@ -536,6 +534,26 @@ class GraphCard(ReadoutCard):
             gc.SetFont(note, wx.Colour(theme['dim']))
             gc.DrawText(name, value_left + LEGEND_SWATCH + 5, y - gc.GetTextExtent(name)[1] / 2)
             self.draw_value(gc, text, right, y)
+
+    def draw_summary(self, gc, width, height):
+        # a folded panel's header: the same plot and legend squeezed into the band
+        theme = self.theme
+        left, slot_right, value_left, right = self.get_grid(width)
+        self.draw_legend(gc, value_left, right, height, SUMMARY_LINE)
+        top = SUMMARY_PAD
+        plot_width, plot_height = slot_right - left, height - SUMMARY_PAD * 2
+        fill_rect(gc, theme['rim'], left, top + plot_height, plot_width, 1)
+        for item in self.series:
+            draw_series(gc, theme, item[1], item[2], (left, top, plot_width, plot_height),
+                        self.capacity, 1.2)
+        return left
+
+    def draw(self, gc, width, height):
+        theme = self.theme
+        draw_row_face(gc, theme, width, height, self.first, self.last)
+        left, slot_right, value_left, right = self.get_grid(width)
+        self.draw_label(gc, height, left - self.PADDING - self.LABEL_GAP)
+        self.draw_legend(gc, value_left, right, height, LEGEND_LINE)
 
         top = GRAPH_PAD
         plot_width, plot_height = slot_right - left, height - GRAPH_PAD * 2
