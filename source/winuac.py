@@ -24,10 +24,10 @@ def is_admin():
 
 def relaunch_as_admin(script, after=None):
     # not pythonw, a run from a terminal would lose its console
-    arguments = '' if hasattr(sys, 'frozen') else '"%s"' % script
+    arguments = '' if hasattr(sys, 'frozen') else f'"{script}"'
     # the new copy waits for this one to let go of the single-instance mutex
     if after:
-        arguments += ' --after %d' % after
+        arguments += f' --after {int(after)}'
     try:
         result = ctypes.windll.shell32.ShellExecuteW(
             None, 'runas', sys.executable, arguments, os.path.dirname(script), 1)

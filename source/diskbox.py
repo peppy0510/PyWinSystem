@@ -32,15 +32,15 @@ SLEEP_NOTE = 'Asleep, so it is not read · reading spins it up'
 
 
 def format_count(value):
-    return '{:,}'.format(value or 0)
+    return f'{value or 0:,}'
 
 
 class DiskCard(ReadoutCard):
 
     def __init__(self, parent, theme, disk):
-        name = disk['name'] or 'Disk %d' % disk['number']
-        description = 'Disk %d · %s · %s · %s' % (disk['number'], disk['media'], disk['bus'],
-                                                  format_bytes(disk['size']))
+        name = disk['name'] or f'Disk {disk["number"]}'
+        description = (f'Disk {disk["number"]} · {disk["media"]} · {disk["bus"]} · '
+                       f'{format_bytes(disk["size"])}')
         super().__init__(parent, theme, name, description)
         self.health = disk['health']
 
@@ -131,36 +131,37 @@ class DiskBox(ScrollArea):
             rows.append(ActionCard(board, theme, 'SMART', 'Needs administrator rights',
                                    'Run as administrator', self.elevate))
         elif kind == 'nvme':
-            value('Temperature', '%d °C' % health['temperature'],
-                  'Above the warning level for %s min, critical for %s min' % (
-                      format_count(health['warning_minutes']),
-                      format_count(health['critical_minutes'])))
-            value('Life used', '%d%%' % health['used'], 'Spare %d%%, warns below %d%%' % (
-                health['spare'], health['spare_threshold']), health['used'] >= 90)
-            value('Power-on time', '%s h' % format_count(health['hours']),
-                  '%s days · %s power cycles' % (format_count(health['hours'] // 24),
-                                                 format_count(health['power_cycles'])))
-            value('Written', format_bytes(health['written']), 'Read %s' % format_bytes(
-                health['read']))
+            value('Temperature', f'{health["temperature"]} °C',
+                  f'Above the warning level for {format_count(health["warning_minutes"])} min, '
+                  f'critical for {format_count(health["critical_minutes"])} min')
+            value('Life used', f'{health["used"]}%',
+                  f'Spare {health["spare"]}%, warns below {health["spare_threshold"]}%',
+                  health['used'] >= 90)
+            value('Power-on time', f'{format_count(health["hours"])} h',
+                  f'{format_count(health["hours"] // 24)} days · '
+                  f'{format_count(health["power_cycles"])} power cycles')
+            value('Written', format_bytes(health['written']),
+                  f'Read {format_bytes(health["read"])}')
             value('Unsafe shutdowns', format_count(health['unsafe_shutdowns']))
             value('Media errors', format_count(health['media_errors']),
-                  'Error log entries %s' % format_count(health['error_entries']),
+                  f'Error log entries {format_count(health["error_entries"])}',
                   health['media_errors'] > 0)
             if health['warning']:
-                value('Critical warning', '0x%02X' % health['warning'],
+                value('Critical warning', f'0x{health["warning"]:02X}',
                       'The drive reports a problem', True)
         elif kind == 'ata':
             if health.get('temperature') is not None:
-                value('Temperature', '%d °C' % health['temperature'])
+                value('Temperature', f'{health["temperature"]} °C')
             if health.get('hours') is not None:
-                value('Power-on time', '%s h' % format_count(health['hours']),
-                      '%s days · %s power cycles' % (format_count(health['hours'] // 24),
-                                                     format_count(health['power_cycles'])))
+                value('Power-on time', f'{format_count(health["hours"])} h',
+                      f'{format_count(health["hours"] // 24)} days · '
+                      f'{format_count(health["power_cycles"])} power cycles')
             for item in health['attributes']:
                 if item['id'] in (9, 12, 190, 194):
                     continue
-                value(item['name'], format_count(item['raw']), 'ID %d · value %d, worst %d' % (
-                    item['id'], item['current'], item['worst']), item['warning'])
+                value(item['name'], format_count(item['raw']),
+                      f'ID {item["id"]} · value {item["current"]}, worst {item["worst"]}',
+                      item['warning'])
         return rows
 
     def elevate(self):
@@ -182,8 +183,8 @@ class DiskBox(ScrollArea):
             if disk['media'] == 'Virtual':
                 continue
             rows = self.get_rows(disk, self.healths.get(disk['number']))
-            panels.append(Panel(board, theme, 'disks.%d' % disk['number'],
-                                'Disk %d' % disk['number'], rows, self.folds, self.on_fold,
+            panels.append(Panel(board, theme, f'disks.{disk["number"]}',
+                                f'Disk {disk["number"]}', rows, self.folds, self.on_fold,
                                 subtitle=disk['media']))
         pooled = [DiskCard(board, theme, disk) for disk in self.found
                   if disk['media'] == 'Virtual']

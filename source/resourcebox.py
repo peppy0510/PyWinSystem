@@ -46,21 +46,21 @@ def format_uptime(seconds):
     days, seconds = divmod(int(seconds), 86400)
     hours, seconds = divmod(seconds, 3600)
     minutes, seconds = divmod(seconds, 60)
-    return '%d %s %02d:%02d:%02d' % (days, 'day' if days == 1 else 'days', hours, minutes,
-                                     seconds)
+    return (f'{days} {"day" if days == 1 else "days"} '
+            f'{int(hours):02d}:{int(minutes):02d}:{int(seconds):02d}')
 
 
 def get_power_text(gpu):
-    parts = ['%.0f W of %.0f W' % (gpu['power'], gpu['power_limit'] or 0)]
+    parts = [f'{gpu["power"]:.0f} W of {gpu["power_limit"] or 0:.0f} W']
     if gpu.get('fan') is not None:
-        parts.append('fan %d%%' % gpu['fan'])
+        parts.append(f'fan {int(gpu["fan"])}%')
     if gpu.get('core_clock') and gpu.get('memory_clock'):
-        parts.append('%d / %d MHz' % (gpu['core_clock'], gpu['memory_clock']))
+        parts.append(f'{int(gpu["core_clock"])} / {int(gpu["memory_clock"])} MHz')
     return ' · '.join(parts)
 
 
 def format_percent(value):
-    return '—' if value is None else '%d%%' % round(value * 100)
+    return '—' if value is None else f'{round(value * 100)}%'
 
 
 def get_ratio(used, total):
@@ -91,7 +91,7 @@ class ResourceBox(ScrollArea):
         self.apply_theme(theme)
 
     def set_disk_names(self, disks):
-        self.disk_names = {'PhysicalDrive%d' % disk['number']: disk for disk in disks}
+        self.disk_names = {f'PhysicalDrive{disk["number"]}': disk for disk in disks}
         self.layout_key = None
 
     def get_layout_key(self, data):
@@ -126,7 +126,7 @@ class ResourceBox(ScrollArea):
                           'cpu': 'graph.cpu', 'memory': 'graph.memory', 'disk': 'graph.disk',
                           'network': 'graph.network'}
         if data['gpus']:
-            self.summaries['gpu'] = 'graph.gpu%d' % data['gpus'][0]['index']
+            self.summaries['gpu'] = f'graph.gpu{int(data["gpus"][0]["index"])}'
         wsl = data['wsl']
         panels = []
 
@@ -144,7 +144,7 @@ class ResourceBox(ScrollArea):
 
         release, version = platform.release(), platform.version()
         cards['host'] = ValueCard(board, theme, 'Hostname',
-                                  'Windows %s · build %s' % (release, version), socket.gethostname())
+                                  f'Windows {release} · build {version}', socket.gethostname())
         cards['uptime'] = ValueCard(board, theme, 'Uptime')
         panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
         panels.append(self.add_panel('sensors', 'Temperature and power',
@@ -160,7 +160,7 @@ class ResourceBox(ScrollArea):
                                          + [graph('graph.wall', 'Wall power over time')],
                                          'Drives, monitors and the rest are estimates'))
 
-        body = [meter('cpu', 'CPU', '%d logical processors' % len(data['cpu']['cores'])),
+        body = [meter('cpu', 'CPU', f'{len(data["cpu"]["cores"])} logical processors'),
                 graph('graph.cpu', 'CPU over time')]
         cards['cores'] = CoreCard(board, theme, 'Per processor')
         body.append(cards['cores'])
@@ -176,11 +176,11 @@ class ResourceBox(ScrollArea):
 
         body = []
         for gpu in data['gpus']:
-            body.append(meter('gpu%d' % gpu['index'], 'GPU %d' % gpu['index'], gpu['name']))
-            body.append(meter('vram%d' % gpu['index'], 'VRAM %d' % gpu['index']))
+            body.append(meter(f'gpu{gpu["index"]}', f'GPU {gpu["index"]}', gpu['name']))
+            body.append(meter(f'vram{gpu["index"]}', f'VRAM {gpu["index"]}'))
             if gpu.get('power') is not None:
-                body.append(meter('power%d' % gpu['index'], 'Power %d' % gpu['index']))
-            body.append(graph('graph.gpu%d' % gpu['index'], 'GPU %d over time' % gpu['index']))
+                body.append(meter(f'power{gpu["index"]}', f'Power {gpu["index"]}'))
+            body.append(graph(f'graph.gpu{gpu["index"]}', f'GPU {gpu["index"]} over time'))
         if body:
             panels.append(self.add_panel('gpu', 'GPU', body,
                                          'WSL share is not reported per process'))
@@ -191,7 +191,7 @@ class ResourceBox(ScrollArea):
             label = disk['name'] if disk else name
             description = name.replace('PhysicalDrive', 'Disk ')
             if disk:
-                description += ' · %s · %s' % (disk['media'], disk['bus'])
+                description += f' · {disk["media"]} · {disk["bus"]}'
             body.append(rate('disk:' + name, label, description))
         if wsl:
             body.append(rate('wsl.disk', 'WSL', 'Virtual disks inside WSL'))
@@ -228,11 +228,11 @@ class ResourceBox(ScrollArea):
         if sensors['cpu_power']:
             value('sensor.cpu', 'CPU power', 'Intel RAPL energy counter')
         for gpu in data['gpus']:
-            value('sensor.gpu%d' % gpu['index'], 'GPU %d' % gpu['index'])
+            value(f'sensor.gpu{gpu["index"]}', f'GPU {gpu["index"]}')
         for number in sorted(sensors['nvme']):
-            disk = self.disk_names.get('PhysicalDrive%d' % number) or {}
-            value('sensor.disk%d' % number, disk.get('name') or 'Disk %d' % number,
-                  'Disk %d · NVMe' % number)
+            disk = self.disk_names.get(f'PhysicalDrive{int(number)}') or {}
+            value(f'sensor.disk{int(number)}', disk.get('name') or f'Disk {int(number)}',
+                  f'Disk {int(number)} · NVMe')
         monitor = sensors['monitor']
         if monitor is None:
             value('sensor.monitor', 'CPU and mainboard temperatures',
@@ -240,7 +240,7 @@ class ResourceBox(ScrollArea):
                   'shown here while LibreHardwareMonitor runs')
         else:
             for index, item in enumerate(monitor):
-                value('sensor.lhm%d' % index, item['name'], item['hardware'])
+                value(f'sensor.lhm{index}', item['name'], item['hardware'])
         if sensors['cpu_power'] or any(gpu.get('power') for gpu in data['gpus']):
             value('sensor.total', 'CPU and GPUs', 'Power drawn by the parts that report it')
             cards['graph.power'] = GraphCard(board, theme, 'Power over time', HISTORY)
@@ -251,30 +251,30 @@ class ResourceBox(ScrollArea):
         cards, sensors = self.cards, data['sensors']
         cpu = sensors['cpu_power']
         if 'sensor.cpu' in cards:
-            parts = ['%s %.1f W' % (label, cpu[key]) for key, label in (
+            parts = [f'{label} {cpu[key]:.1f} W' for key, label in (
                 ('cores', 'Cores'), ('graphics', 'Graphics'), ('dram', 'Memory')) if key in cpu]
-            cards['sensor.cpu'].set_value('%.1f W' % cpu.get('package', 0),
+            cards['sensor.cpu'].set_value(f'{cpu.get("package", 0):.1f} W',
                                           ' · '.join(parts) or 'Intel RAPL energy counter')
         gpu_watts = 0.0
         for gpu in data['gpus']:
-            key = 'sensor.gpu%d' % gpu['index']
+            key = f'sensor.gpu{gpu["index"]}'
             parts = [gpu['name']]
             if gpu.get('power') is not None:
-                parts.append('%.0f W' % gpu['power'])
+                parts.append(f'{gpu["power"]:.0f} W')
                 gpu_watts += gpu['power']
             if key in cards:
-                cards[key].set_value('' if gpu.get('temp') is None else '%d °C' % gpu['temp'],
+                cards[key].set_value('' if gpu.get('temp') is None else f'{gpu["temp"]} °C',
                                      ' · '.join(parts))
         for number, temperature in sensors['nvme'].items():
-            if 'sensor.disk%d' % number in cards:
-                cards['sensor.disk%d' % number].set_value('%d °C' % temperature)
+            if f'sensor.disk{int(number)}' in cards:
+                cards[f'sensor.disk{int(number)}'].set_value(f'{int(temperature)} °C')
         for index, item in enumerate(sensors['monitor'] or []):
-            if 'sensor.lhm%d' % index in cards:
+            if f'sensor.lhm{index}' in cards:
                 unit = '%.0f °C' if item['type'] == 'Temperature' else '%.0f rpm'
-                cards['sensor.lhm%d' % index].set_value(unit % item['value'])
+                cards[f'sensor.lhm{index}'].set_value(unit % item['value'])
         if 'sensor.total' in cards:
             cpu_watts = cpu.get('package', 0.0)
-            cards['sensor.total'].set_value('%.0f W' % (cpu_watts + gpu_watts))
+            cards['sensor.total'].set_value(f'{cpu_watts + gpu_watts:.0f} W')
             history = self.history
             history['power.cpu'].append(cpu_watts)
             history['power.gpu'].append(gpu_watts)
@@ -282,13 +282,13 @@ class ResourceBox(ScrollArea):
             ceiling = get_watt_ceiling(max(values + [0]))
 
             def watts(value):
-                return '%.0f W' % (value * ceiling)
+                return f'{value * ceiling:.0f} W'
             cards['graph.power'].set_series([
                 ('CPU', [value / ceiling for value in history['power.cpu']], 'area',
-                 '%.0f W' % cpu_watts, watts),
+                 f'{cpu_watts:.0f} W', watts),
                 ('GPUs', [value / ceiling for value in history['power.gpu']], 'line',
-                 '%.0f W' % gpu_watts, watts)],
-                self.get_span(), '%d W' % ceiling, self.interval)
+                 f'{gpu_watts:.0f} W', watts)],
+                self.get_span(), f'{int(ceiling)} W', self.interval)
 
     def set_electricity(self, values):
         self.electricity = values
@@ -316,7 +316,7 @@ class ResourceBox(ScrollArea):
                 continue
             # busy reads as the top state; idle as the lowest, where Windows parks an idle
             # drive on its own (APST)
-            busy = any(data['disks'].get('PhysicalDrive%d' % number) or (0, 0))
+            busy = any(data['disks'].get(f'PhysicalDrive{int(number)}') or (0, 0))
             watts += max(power for power, _ in states) if busy else min(
                 power for power, _ in states)
         for number, spinning in (sensors.get('spinning') or {}).items():
@@ -328,10 +328,10 @@ class ResourceBox(ScrollArea):
         state = self.display.state if self.display else 'on'
         each = float(self.electricity.get('monitor_watts', 25))
         if state == 'off':
-            return count * MONITOR_OFF, '%d off' % count
+            return count * MONITOR_OFF, f'{int(count)} off'
         if state is None:
-            return count * each, '%d, on state unknown, %.0f W each' % (count, each)
-        return count * each, '%d %s, %.0f W each' % (count, state, each)
+            return count * each, f'{int(count)}, on state unknown, {each:.0f} W each'
+        return count * each, f'{int(count)} {state}, {each:.0f} W each'
 
     def set_cost(self, data):
         cards = self.cards
@@ -350,9 +350,9 @@ class ResourceBox(ScrollArea):
         # monitors draw from the wall themselves, not through the power supply
         wall = case * 100.0 / efficiency + monitors
         self.energy.add(wall, seconds)
-        cards['cost.case'].set_value('%.0f W' % case, 'CPU %.0f · GPUs %.0f · drives %.0f · '
-                                     'rest %.0f W' % (cpu, gpus, drives, other))
-        cards['cost.monitors'].set_value('%.0f W' % monitors, monitor_note)
+        cards['cost.case'].set_value(f'{case:.0f} W', f'CPU {cpu:.0f} · GPUs {gpus:.0f} · '
+                                     f'drives {drives:.0f} · rest {other:.0f} W')
+        cards['cost.monitors'].set_value(f'{monitors:.0f} W', monitor_note)
 
         tariff, month = self.get_tariff(), time.localtime().tm_mon
         household = float(self.electricity.get('household_kwh', 250))
@@ -363,28 +363,28 @@ class ResourceBox(ScrollArea):
 
         monthly = wall / 1000.0 * 24 * energy.DAYS_PER_MONTH
         month_cost = energy.get_share(monthly, household, tariff, month)
-        cards['cost.wall'].set_value('%.0f W' % wall, 'The case at %.0f%% efficiency, '
-                                     'plus the monitors' % efficiency)
+        cards['cost.wall'].set_value(f'{wall:.0f} W', f'The case at {efficiency:.0f}% efficiency, '
+                                     'plus the monitors')
         history = self.history['power.wall']
         history.append(wall)
         ceiling = get_watt_ceiling(max(history))
 
         def watts(value):
-            return '%.0f W' % (value * ceiling)
+            return f'{value * ceiling:.0f} W'
         cards['graph.wall'].set_series([
-            ('Wall', [value / ceiling for value in history], 'area', '%.0f W' % wall, watts)],
-            self.get_span(), '%d W' % ceiling, self.interval)
+            ('Wall', [value / ceiling for value in history], 'area', f'{wall:.0f} W', watts)],
+            self.get_span(), f'{int(ceiling)} W', self.interval)
         cards['cost.rate'].set_value(money(month_cost / (24 * energy.DAYS_PER_MONTH)) + ' / h',
-                                     'Day %s · month %s · %s' % (
-                                         money(month_cost / energy.DAYS_PER_MONTH),
-                                         money(month_cost), tariff.get('name', '')))
+                                     f'Day {money(month_cost / energy.DAYS_PER_MONTH)} · month '
+                                     f'{money(month_cost)} · {tariff.get("name", "")}')
         used_month, used_today = self.energy.get_month(), self.energy.get_today()
         spent = energy.get_share(used_month, household, tariff, month)
         price = spent / used_month if used_month else 0.0
         cards['cost.today'].set_value(money(used_today * price),
-                                      '%.2f kWh counted while this app ran' % used_today)
-        cards['cost.month'].set_value(money(spent), '%s kWh counted while this app ran' % (
-            '%.2f' % used_month if used_month < 10 else '%.1f' % used_month))
+                                      f'{used_today:.2f} kWh counted while this app ran')
+        digits = 2 if used_month < 10 else 1
+        cards['cost.month'].set_value(money(spent),
+                                      f'{used_month:.{digits}f} kWh counted while this app ran')
 
     def on_fold(self):
         self.relayout_panels()
@@ -408,8 +408,8 @@ class ResourceBox(ScrollArea):
         cards, wsl = self.cards, data['wsl']
 
         seconds = time.time() - data['boot']
-        cards['uptime'].set_value(format_uptime(seconds), 'Since %s' % time.strftime(
-            '%Y-%m-%d %H:%M', time.localtime(data['boot'])))
+        boot = time.strftime('%Y-%m-%d %H:%M', time.localtime(data['boot']))
+        cards['uptime'].set_value(format_uptime(seconds), f'Since {boot}')
 
         cpu = data['cpu']
         cards['cpu'].set_value(cpu['total'] / 100.0,
@@ -417,23 +417,25 @@ class ResourceBox(ScrollArea):
         cards['cores'].set_values(cpu['cores'])
 
         memory = data['memory']
-        cards['memory'].set_value(get_ratio(memory['used'], memory['total']), '%s of %s' % (
-            format_bytes(memory['used']), format_bytes(memory['total'])),
+        cards['memory'].set_value(
+            get_ratio(memory['used'], memory['total']),
+            f'{format_bytes(memory["used"])} of {format_bytes(memory["total"])}',
             share=wsl and get_ratio(wsl.get('host_memory', 0), memory['total']))
         swap = data['swap']
-        cards['swap'].set_value(get_ratio(swap['used'], swap['total']), '%s of %s' % (
-            format_bytes(swap['used']), format_bytes(swap['total'])))
+        cards['swap'].set_value(get_ratio(swap['used'], swap['total']),
+                                f'{format_bytes(swap["used"])} of {format_bytes(swap["total"])}')
 
         for gpu in data['gpus']:
             index = gpu['index']
-            temp = '%d°C' % gpu['temp'] if gpu.get('temp') is not None else ''
-            cards['gpu%d' % index].set_value(gpu['util'] / 100.0, ' · '.join(
+            temp = f'{gpu["temp"]}°C' if gpu.get('temp') is not None else ''
+            cards[f'gpu{index}'].set_value(gpu['util'] / 100.0, ' · '.join(
                 part for part in (gpu['name'], temp) if part))
-            cards['vram%d' % index].set_value(get_ratio(gpu['used'], gpu['total']), '%s of %s' % (
-                format_bytes(gpu['used']), format_bytes(gpu['total'])))
-            if 'power%d' % index in cards:
-                cards['power%d' % index].set_value(get_ratio(gpu['power'], gpu['power_limit']),
-                                                   get_power_text(gpu))
+            cards[f'vram{index}'].set_value(
+                get_ratio(gpu['used'], gpu['total']),
+                f'{format_bytes(gpu["used"])} of {format_bytes(gpu["total"])}')
+            if f'power{index}' in cards:
+                cards[f'power{index}'].set_value(get_ratio(gpu['power'], gpu['power_limit']),
+                                                 get_power_text(gpu))
 
         for name, pair in data['disks'].items():
             cards['disk:' + name].set_rates(pair, interval=self.interval)
@@ -491,7 +493,7 @@ class ResourceBox(ScrollArea):
 
     def get_span(self):
         seconds = HISTORY * self.interval
-        return '%d min' % round(seconds / 60) if seconds >= 120 else '%d s' % seconds
+        return f'{round(seconds / 60)} min' if seconds >= 120 else f'{int(seconds)} s'
 
     def set_history(self, data):
         history, wsl = self.history, data['wsl']
@@ -502,8 +504,8 @@ class ResourceBox(ScrollArea):
         history['memory.wsl'].append(get_ratio(wsl.get('host_memory', 0), memory['total'])
                                      if wsl else None)
         for gpu in data['gpus']:
-            history['gpu%d' % gpu['index']].append(gpu['util'] / 100.0)
-            history['vram%d' % gpu['index']].append(get_ratio(gpu['used'], gpu['total']))
+            history[f'gpu{gpu["index"]}'].append(gpu['util'] / 100.0)
+            history[f'vram{gpu["index"]}'].append(get_ratio(gpu['used'], gpu['total']))
 
         # Storage Spaces drives repeat the I/O of the disks under them
         physical = [name for name in data['disks']
@@ -535,29 +537,30 @@ class ResourceBox(ScrollArea):
             cards['graph.' + key].set_series(series, span, interval=self.interval)
         for gpu in data['gpus']:
             index = gpu['index']
-            cards['graph.gpu%d' % index].set_series([
-                ('GPU', list(history['gpu%d' % index]), 'area',
-                 format_percent(history['gpu%d' % index][-1])),
-                ('VRAM', list(history['vram%d' % index]), 'line',
-                 format_percent(history['vram%d' % index][-1]))], span, interval=self.interval)
+            cards[f'graph.gpu{index}'].set_series([
+                ('GPU', list(history[f'gpu{index}']), 'area',
+                 format_percent(history[f'gpu{index}'][-1])),
+                ('VRAM', list(history[f'vram{index}']), 'line',
+                 format_percent(history[f'vram{index}'][-1]))], span, interval=self.interval)
 
     def set_wsl(self, wsl, cpu):
         cards, config = self.cards, wsl['config']
         processors = config.get('processors') or len(cpu['cores'])
         cards['wsl.cpu'].set_value(
             None if wsl.get('cpu') is None else wsl['cpu'] / 100.0,
-            '%d of %d processors · %.1f%% of the whole PC' % (
-                processors, len(cpu['cores']), wsl.get('host_cpu', 0)))
+            f'{int(processors)} of {len(cpu["cores"])} processors · {wsl.get("host_cpu", 0):.1f}% '
+            'of the whole PC')
         inside = wsl.get('memory')
         limit = config.get('memory') or (inside or {}).get('total')
         if inside:
-            cards['wsl.memory'].set_value(get_ratio(inside['used'], limit), '%s of %s limit · '
-                                          '%s on Windows' % (
-                                              format_bytes(inside['used']), format_bytes(limit),
-                                              format_bytes(wsl.get('host_memory'))))
+            windows = format_bytes(wsl.get('host_memory'))
+            cards['wsl.memory'].set_value(
+                get_ratio(inside['used'], limit),
+                f'{format_bytes(inside["used"])} of {format_bytes(limit)} limit · '
+                f'{windows} on Windows')
         else:
-            cards['wsl.memory'].set_value(None, '%s on Windows' % format_bytes(
-                wsl.get('host_memory')))
+            cards['wsl.memory'].set_value(None, f'{format_bytes(wsl.get("host_memory"))} '
+                                          'on Windows')
         cards['wsl.disk'].set_rates(wsl.get('disk'), interval=self.interval)
         cards['wsl.network'].set_rates(wsl.get('network'), interval=self.interval)
 

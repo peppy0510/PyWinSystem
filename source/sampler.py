@@ -152,7 +152,8 @@ class Wsl:
         return host
 
     def read_proc(self, name):
-        path = r'\\wsl.localhost\%s\proc\%s' % (self.distro, name.replace('/', '\\'))
+        name = name.replace('/', '\\')
+        path = rf'\\wsl.localhost\{self.distro}\proc\{name}'
         with open(path, encoding='utf-8', errors='replace') as file:
             return file.read()
 

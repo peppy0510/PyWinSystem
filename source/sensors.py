@@ -33,7 +33,7 @@ class EnergyMeter:
             self.query = win32pdh.OpenQuery()
             for instance in instances:
                 if instance in ENERGY_PARTS:
-                    path = r'\%s(%s)\Power' % (ENERGY_OBJECT, instance)
+                    path = rf'\{ENERGY_OBJECT}({instance})\Power'
                     self.counters[ENERGY_PARTS[instance]] = win32pdh.AddEnglishCounter(
                         self.query, path)
             win32pdh.CollectQueryData(self.query)

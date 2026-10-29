@@ -33,7 +33,7 @@ VALUE_FONT = 8.5
 # a fixed unit stays put under plain right alignment
 UNITS = ('B/s', 'KB/s', 'MB/s', 'GB/s', 'TB/s')
 UNIT_PATTERN = '|'.join(re.escape(unit) for unit in sorted(UNITS, key=len, reverse=True))
-MEASURE = re.compile(r'^([\d.,]+)\s*(%s)$' % UNIT_PATTERN)
+MEASURE = re.compile(rf'^([\d.,]+)\s*({UNIT_PATTERN})$')
 UNIT_GAP = 3
 HIGH = 0.9
 
@@ -65,7 +65,7 @@ def get_rate_scale(peak):
 def format_rate(value, scale):
     ceiling, unit, name = scale
     digits = 1 if ceiling / unit <= 10 else 0
-    return '%.*f %s' % (digits, (value or 0) / unit, name)
+    return f'{(value or 0) / unit:.{digits}f} {name}'
 
 
 def get_unit_width():
@@ -74,7 +74,7 @@ def get_unit_width():
 
 
 def format_ratio(value):
-    return '—' if value is None else '%d%%' % round(value * 100)
+    return '—' if value is None else f'{round(value * 100)}%'
 
 
 def format_ago(seconds):
@@ -82,9 +82,9 @@ def format_ago(seconds):
     if seconds <= 0:
         return 'Now'
     if seconds < 60:
-        return '%d s ago' % seconds
+        return f'{int(seconds)} s ago'
     minutes, rest = divmod(seconds, 60)
-    return '%d min %d s ago' % (minutes, rest) if rest else '%d min ago' % minutes
+    return f'{int(minutes)} min {int(rest)} s ago' if rest else f'{int(minutes)} min ago'
 
 
 def find_sample(hover, left, width, capacity, length):
@@ -249,9 +249,9 @@ class MeterCard(ReadoutCard):
         if not self.hover or self.value is None:
             hide_hover_tip(self)
             return
-        lines = [(self.label, 'dim'), ('Used  %s' % format_ratio(self.value), 'text')]
+        lines = [(self.label, 'dim'), (f'Used  {format_ratio(self.value)}', 'text')]
         if self.share is not None:
-            lines.append(('WSL  %s' % format_ratio(self.share), 'text'))
+            lines.append((f'WSL  {format_ratio(self.share)}', 'text'))
         if self.description:
             lines.append((self.description, 'dim'))
         show_hover_tip(self, self.theme, lines, point)
@@ -261,7 +261,7 @@ class MeterCard(ReadoutCard):
         left, slot_right, _, right = self.get_grid(width)
         value = None if self.value is None else max(0.0, min(1.0, self.value))
         high = value is not None and value >= HIGH
-        self.draw_value(gc, '—' if value is None else '%d%%' % round(value * 100), right,
+        self.draw_value(gc, '—' if value is None else f'{round(value * 100)}%', right,
                         height / 2, 'warn' if high else 'text')
         bar_width = slot_right - left
         top = (height - BAR_HEIGHT) / 2
@@ -347,7 +347,7 @@ class RateCard(ReadoutCard):
         lines = [(format_ago((len(self.history[0]) - 1 - index) * self.interval), 'dim')]
         for name, values in zip(self.names, self.history):
             value = values[index]
-            lines.append(('%s  %s' % (name, '—' if value is None else format_rate(value, scale)),
+            lines.append((f'{name}  {"—" if value is None else format_rate(value, scale)}',
                           'text'))
         show_hover_tip(self, self.theme, lines, point)
 
@@ -424,8 +424,8 @@ class CoreCard(ReadoutCard):
         if self.hover is None or self.hover >= len(self.values):
             hide_hover_tip(self)
             return
-        show_hover_tip(self, self.theme, [('Processor %d' % self.hover, 'dim'),
-                                          ('Load  %d%%' % self.values[self.hover], 'text')],
+        show_hover_tip(self, self.theme, [(f'Processor {int(self.hover)}', 'dim'),
+                                          (f'Load  {int(self.values[self.hover])}%', 'text')],
                        point)
 
     def draw_control(self, gc, width, height):
@@ -515,7 +515,7 @@ class GraphCard(ReadoutCard):
             values = item[1]
             value = values[index] if index < len(values) else None
             form = item[4] if len(item) > 4 else format_ratio
-            lines.append(('%s  %s' % (item[0], '—' if value is None else form(value)), 'text'))
+            lines.append((f'{item[0]}  {"—" if value is None else form(value)}', 'text'))
         show_hover_tip(self, self.theme, lines, point)
 
     def draw_hover(self, gc, plot):

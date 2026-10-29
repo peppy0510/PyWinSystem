@@ -104,7 +104,7 @@ class SettingsBox(ScrollArea):
         try:
             subprocess.Popen(['notepad.exe', energy.TARIFF_PATH])
         except OSError as error:
-            self.rates.set_description('Could not open %s: %s' % (energy.TARIFF_PATH, error))
+            self.rates.set_description(f'Could not open {energy.TARIFF_PATH}: {error}')
 
     def on_fold(self):
         self.relayout_panels()

@@ -141,7 +141,7 @@ class Helper(threading.Thread):
                          'ppid': stat['ppid'], 'name': stat['name'], 'created': stat['start'],
                          'cpu': cpu, 'memory': stat['rss'] * page, 'threads': stat['threads'],
                          'state': STATES.get(stat['state'], stat['state']), 'user': user,
-                         'command': command or '[%s]' % stat['name'], 'started': started,
+                         'command': command or f'[{stat["name"]}]', 'started': started,
                          'path': None})
         self.previous, self.previous_uptime = ticks, uptime
         self.owner.on_rows(self, rows)

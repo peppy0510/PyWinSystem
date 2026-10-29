@@ -27,12 +27,12 @@ def format_speed(bits):
         return ''
     for unit, size in (('Gbps', 10 ** 9), ('Mbps', 10 ** 6), ('Kbps', 10 ** 3)):
         if bits >= size:
-            return ('%g %s' % (round(bits / float(size), 1), unit))
-    return '%d bps' % bits
+            return (f'{round(bits / float(size), 1):g} {unit}')
+    return f'{int(bits)} bps'
 
 
 def describe_module(module):
-    speed = '%d MT/s' % module['configured'] if module.get('configured') else ''
+    speed = f'{int(module["configured"])} MT/s' if module.get('configured') else ''
     return join(module['maker'], module['part'], module['type'], speed)
 
 
@@ -62,17 +62,17 @@ class HardwareBox(ScrollArea):
         board, theme = self.content, self.theme
         panels = []
         cpu = found['cpu']
-        clock = '%.1f GHz base' % (cpu['mhz'] / 1000.0) if cpu.get('mhz') else ''
+        clock = f'{cpu["mhz"] / 1000.0:.1f} GHz base' if cpu.get('mhz') else ''
         body = [ValueCard(board, theme, cpu['name'] or 'Processor',
-                          join('%s cores' % cpu['cores'], '%s threads' % cpu['threads'], clock))]
+                          join(f'{cpu["cores"]} cores', f'{cpu["threads"]} threads', clock))]
         if found.get('board'):
             body.append(ValueCard(board, theme, found['board'], 'Mainboard'))
         bios, firmware = found.get('bios'), found.get('firmware') or {}
         if bios:
             secure = firmware.get('secure_boot')
             if secure is not None:
-                secure = 'Secure Boot %s' % ('on' if secure else 'off')
-            body.append(ValueCard(board, theme, 'BIOS %s' % bios['version'], join(
+                secure = f'Secure Boot {"on" if secure else "off"}'
+            body.append(ValueCard(board, theme, f'BIOS {bios["version"]}', join(
                 bios['maker'], bios['date'], firmware.get('type'), secure)))
         panels.append(self.add_panel('cpu', 'Processor', body))
 
@@ -80,7 +80,7 @@ class HardwareBox(ScrollArea):
         body = [ValueCard(board, theme, module['slot'] or 'Module', describe_module(module),
                           format_bytes(module['size'])) for module in modules]
         panels.append(self.add_panel('memory', 'Memory', body, join(
-            format_bytes(found['total']), '%d modules' % len(modules) if modules else '')))
+            format_bytes(found['total']), f'{len(modules)} modules' if modules else '')))
 
         body = []
         for gpu in found['gpus']:

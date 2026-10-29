@@ -107,7 +107,7 @@ def get_share(kwh, household, tariff, month):
 
 def format_money(value, currency):
     symbol, digits = CURRENCIES.get(currency, ('', 2))
-    return symbol + format(value, ',.%df' % digits)
+    return symbol + format(value, f',.{int(digits)}f')
 
 
 class EnergyLog:

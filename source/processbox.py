@@ -99,7 +99,7 @@ VIEWS = (('list', 'List'), ('tree', 'Tree'))
 
 
 def format_cpu(value):
-    return '' if value is None else '%.1f%%' % value
+    return '' if value is None else f'{value:.1f}%'
 
 
 def describe(value):
@@ -304,7 +304,7 @@ class ProcessList(Canvas):
                 hint = processes.summarize_args(processes.split_command_line(command))
             if not hint:
                 names = [name for name, _ in self.services.get(row['pid'], [])]
-                hint = ', '.join(names[:2]) + (' +%d' % (len(names) - 2)
+                hint = ', '.join(names[:2]) + (f' +{len(names) - 2}'
                                                if len(names) > 2 else '')
             hints[row['key']] = hint
         # conhost says nothing of itself; the console program that started it is its parent
@@ -316,7 +316,7 @@ class ProcessList(Canvas):
                 hints[row['key']] = ''
                 continue
             inner = hints.get(parent['key'])
-            hints[row['key']] = 'for %s%s' % (parent['name'], ' · ' + inner if inner else '')
+            hints[row['key']] = f'for {parent["name"]}{" · " + inner if inner else ""}'
         self.hints = hints
         for row in rows:
             row['hint'] = hints.get(row['key'], '')
@@ -493,8 +493,8 @@ class ProcessList(Canvas):
     def get_parent_text(self, row):
         parent = self.get_parent(row)
         if parent is not None:
-            return '%s · %s' % (parent['name'], self.get_pid_text(parent))
-        return 'PID %d · exited' % row['ppid'] if row['ppid'] else MISSING
+            return f'{parent["name"]} · {self.get_pid_text(parent)}'
+        return f'PID {int(row["ppid"])} · exited' if row['ppid'] else MISSING
 
     @staticmethod
     def get_pid_text(row):
@@ -508,8 +508,8 @@ class ProcessList(Canvas):
                       ('User', row['user'] or MISSING, 1),
                       ('Parent', self.get_parent_text(row), 1),
                       ('Started', row['started'].strftime('%Y-%m-%d %H:%M:%S'), 1),
-                      ('State', '%s · %d threads' % (row['state'], row['threads']), 1),
-                      ('Memory', 'Resident %s' % format_bytes(row['memory']), 1)]
+                      ('State', f'{row["state"]} · {int(row["threads"])} threads', 1),
+                      ('Memory', f'Resident {format_bytes(row["memory"])}', 1)]
             return self.lay_detail(fields, ['command'], width, {'command': row['command']})
         command = details.get('cmdline')
         command = processes.join_cmdline(command) if command else command
@@ -520,13 +520,13 @@ class ProcessList(Canvas):
                   ('User', describe(details.get('user')), 1),
                   ('Parent', self.get_parent_text(row), 1),
                   ('Started', started.strftime('%Y-%m-%d %H:%M:%S') if started else MISSING, 1),
-                  ('Threads', '%d threads · %d handles · session %d' % (
-                      row['threads'], row['handles'], row['session']), 1),
-                  ('Memory', 'Private %s · working set %s · commit %s' % (
-                      format_bytes(row['memory']), format_bytes(row['working_set']),
-                      format_bytes(row['commit'])), 2),
-                  ('I/O', 'Read %s · written %s' % (format_bytes(row['read']),
-                                                    format_bytes(row['written'])), 1)]
+                  ('Threads', f'{int(row["threads"])} threads · {int(row["handles"])} handles · '
+                              f'session {int(row["session"])}', 1),
+                  ('Memory', f'Private {format_bytes(row["memory"])} · working set '
+                             f'{format_bytes(row["working_set"])} · commit '
+                             f'{format_bytes(row["commit"])}', 2),
+                  ('I/O', f'Read {format_bytes(row["read"])} · written '
+                          f'{format_bytes(row["written"])}', 1)]
         services = self.services.get(row['pid'])
         if services:
             fields.insert(2, ('Services', ', '.join(display or name for name, display in services),
@@ -953,9 +953,9 @@ class ProcessList(Canvas):
     def get_subtitle(self):
         total = len(self.rows)
         linux = sum(1 for row in self.rows if row.get('wsl'))
-        text = '%d running' % total if not self.is_filtered() else \
-            '%d of %d' % (self.matched, total)
-        return text + (' · %d in WSL' % linux if linux else '')
+        text = f'{total} running' if not self.is_filtered() else \
+            f'{int(self.matched)} of {total}'
+        return text + (f' · {int(linux)} in WSL' if linux else '')
 
     def draw(self, gc, width, height):
         theme = self.theme
@@ -1025,7 +1025,7 @@ class ProcessList(Canvas):
         gc.DrawText(name, name_left, name_top)
         note = row['hint']
         if row['inside']:
-            note = '%d inside%s' % (row['inside'], ' · ' + note if note else '')
+            note = f'{int(row["inside"])} inside{" · " + note if note else ""}'
         used = get_text_width(name_font, name) + PID_GAP
         if note and room - used >= HINT_MIN:
             gc.SetFont(note_font, wx.Colour(theme['dim']))

@@ -84,7 +84,7 @@ def read_wmi():
         released = item.ReleaseDate or ''
         bios = {'maker': (item.Manufacturer or '').strip(),
                 'version': (item.SMBIOSBIOSVersion or '').strip(),
-                'date': '%s-%s-%s' % (released[:4], released[4:6], released[6:8])
+                'date': f'{released[:4]}-{released[4:6]}-{released[6:8]}'
                 if len(released) >= 8 else ''}
     service = win32com.client.GetObject(r'winmgmts:\\.\root\StandardCimv2')
     nics = []
@@ -117,9 +117,8 @@ def read_nvidia():
         name = pynvml.nvmlDeviceGetName(handle)
         detail = {'vram': pynvml.nvmlDeviceGetMemoryInfo(handle).total}
         try:
-            detail['pcie'] = 'PCIe %d.0 x%d' % (
-                pynvml.nvmlDeviceGetMaxPcieLinkGeneration(handle),
-                pynvml.nvmlDeviceGetMaxPcieLinkWidth(handle))
+            detail['pcie'] = (f'PCIe {int(pynvml.nvmlDeviceGetMaxPcieLinkGeneration(handle))}.0 '
+                              f'x{int(pynvml.nvmlDeviceGetMaxPcieLinkWidth(handle))}')
         except Exception:
             detail['pcie'] = None
         details[name] = detail

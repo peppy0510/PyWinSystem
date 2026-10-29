@@ -56,7 +56,7 @@ kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
 
 
 def open_disk(number, access=0):
-    handle = kernel32.CreateFileW(r'\\.\PhysicalDrive%d' % number, access, SHARE_READ_WRITE,
+    handle = kernel32.CreateFileW(rf'\\.\PhysicalDrive{int(number)}', access, SHARE_READ_WRITE,
                                   None, OPEN_EXISTING, 0, None)
     return None if handle == INVALID_HANDLE else handle
 
@@ -165,7 +165,7 @@ def read_ata(number):
         raw = read_uint(data, offset + 5, 6)
         if code in (190, 194):
             raw &= 0xFF
-        attributes.append({'id': code, 'name': ATA_ATTRIBUTES.get(code, 'Attribute %d' % code),
+        attributes.append({'id': code, 'name': ATA_ATTRIBUTES.get(code, f'Attribute {code}'),
                            'current': data[offset + 3], 'worst': data[offset + 4], 'raw': raw,
                            'warning': code in ATA_WARNINGS and raw > 0})
     found = {item['id']: item['raw'] for item in attributes}
