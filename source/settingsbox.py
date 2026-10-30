@@ -10,13 +10,21 @@ email: peppy0510@hotmail.com
 import subprocess
 
 import energy
+import wx
 
+from controls import AboutCard
 from controls import ActionCard
 from controls import ChoiceCard
 from controls import Panel
 from controls import ScrollArea
 from controls import SettingCard
 from controls import SliderCard
+from utilities import APP_AUTHOR
+from utilities import APP_EMAIL
+from utilities import APP_HOME
+from utilities import APP_NAME
+from utilities import APP_VERSION
+from utilities import get_asset_path
 
 THEMES = (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark'))
 INTERVALS = ((1, '1 s'), (2, '2 s'), (5, '5 s'))
@@ -85,6 +93,11 @@ class SettingsBox(ScrollArea):
                   (self.plan, self.household, self.other, self.hdd, self.monitor,
                    self.efficiency, self.rates),
                   self.folds, self.on_fold),
+            Panel(board, theme, 'settings.about', 'About',
+                  (AboutCard(board, theme, f'{APP_NAME} {APP_VERSION}',
+                             (APP_AUTHOR, APP_EMAIL), 'GitHub', self.on_home,
+                             wx.Image(get_asset_path('icon', 'muteklab.png'))),),
+                  self.folds, self.on_fold),
         ])
         self.bind_children()
         self.apply_theme(theme)
@@ -105,6 +118,10 @@ class SettingsBox(ScrollArea):
             subprocess.Popen(['notepad.exe', energy.TARIFF_PATH])
         except OSError as error:
             self.rates.set_description(f'Could not open {energy.TARIFF_PATH}: {error}')
+
+    def on_home(self):
+        # explorer hands the link to the shell, so the browser does not inherit elevation
+        subprocess.Popen(['explorer', APP_HOME])
 
     def on_fold(self):
         self.relayout_panels()
