@@ -45,6 +45,8 @@ class SettingsBox(ScrollArea):
                                 on_change)
         self.close_to_tray = SettingCard(board, theme, 'Close to tray',
                                          'Closing hides the window instead of quitting', on_change)
+        self.autohide = SettingCard(board, theme, 'Auto hide menu', 'Show the header only on hover',
+                                    on_change)
         self.theme_choice = ChoiceCard(board, theme, 'Theme', 'Auto follows Windows',
                                        THEMES, on_change)
         self.interval = ChoiceCard(board, theme, 'Refresh', 'How often the numbers update',
@@ -79,12 +81,14 @@ class SettingsBox(ScrollArea):
         self.efficiency.SetValue(settings.get('psu_efficiency', 90))
         self.tray.SetValue(settings.get('tray_icon', True))
         self.close_to_tray.SetValue(settings.get('close_to_tray', False))
+        self.autohide.SetValue(settings.get('auto_hide_menu', False))
         self.theme_choice.SetValue(settings.get('theme', 'dark'))
         self.interval.SetValue(settings.get('interval', 1))
 
         self.set_panels([
             Panel(board, theme, 'settings.window', 'Window',
-                  (self.ontop, self.tray, self.close_to_tray), self.folds, self.on_fold),
+                  (self.ontop, self.tray, self.close_to_tray, self.autohide), self.folds,
+                  self.on_fold),
             Panel(board, theme, 'settings.appearance', 'Appearance', (self.theme_choice,),
                   self.folds, self.on_fold),
             Panel(board, theme, 'settings.sampling', 'Sampling', (self.interval,), self.folds,
@@ -105,6 +109,7 @@ class SettingsBox(ScrollArea):
     def get_values(self):
         return {'on_top': self.ontop.GetValue(), 'tray_icon': self.tray.GetValue(),
                 'close_to_tray': self.close_to_tray.GetValue(),
+                'auto_hide_menu': self.autohide.GetValue(),
                 'theme': self.theme_choice.GetValue(), 'interval': self.interval.GetValue(),
                 'plan': self.plan.GetValue(), 'household_kwh': self.household.GetValue(),
                 'other_watts': self.other.GetValue(), 'hdd_watts': self.hdd.GetValue(),

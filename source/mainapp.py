@@ -44,6 +44,9 @@ MENU_ITEMS = (('Resources', 'chart'), ('Processes', 'list'), ('Hardware', 'chip'
 
 FRAME_STYLE = wx.DEFAULT_FRAME_STYLE & ~wx.CAPTION
 
+# the sampler ticks once a second at best, too slow to follow the cursor
+HEADER_POLL = 150
+
 MIN_VISIBLE_WIDTH = 120
 MIN_VISIBLE_HEIGHT = 32
 
@@ -139,6 +142,8 @@ class MainFrame(wx.Frame):
         sizer.Add(self.book, 1, wx.EXPAND)
         self.SetSizer(sizer)
 
+        self.header_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.update_header, self.header_timer)
         self.sampler = SamplerThread(self)
         self.resourcebox.display = DisplayState()
         self.resourcebox.display.start()
@@ -265,7 +270,20 @@ class MainFrame(wx.Frame):
         self.resourcebox.set_interval(values['interval'])
         self.processbox.set_interval(values['interval'])
         self.resourcebox.set_electricity(values)
+        if values['auto_hide_menu']:
+            if not self.header_timer.IsRunning():
+                self.header_timer.Start(HEADER_POLL)
+        else:
+            self.header_timer.Stop()
+        self.update_header()
         self.store_settings()
+
+    def update_header(self, event=None):
+        visible = (not self.settingsbox.autohide.GetValue() or
+                   self.book.GetCurrentPage() is self.settingsbox or
+                   self.sidemenu.is_open() or
+                   self.GetScreenRect().Contains(wx.GetMousePosition()))
+        self.titlebar.set_visible(visible)
 
     def remove_tray(self):
         self.tray.RemoveIcon()
@@ -326,6 +344,7 @@ class MainFrame(wx.Frame):
             self.sampler.visible = False
             return
         self.sampler.running = False
+        self.header_timer.Stop()
         # the WSL helpers would keep their distros awake
         self.processbox.close()
         # the drawer's capture and slide timer crash a closing frame (0xc0000374)

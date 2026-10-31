@@ -12,7 +12,7 @@
 * Temperature and power panel: CPU package power from the Windows energy counter (Intel RAPL), GPU temperature and power, NVMe temperatures, a power graph, and CPU and mainboard temperatures and fans while LibreHardwareMonitor runs.
 * Electricity cost: wall power from the measured CPU and GPUs, NVMe drives from their own power state table (top state while busy, lowest while idle), hard disks by whether they spin, monitors by count and whether Windows has the displays on, and a setting for the rest; the case goes through the power supply efficiency, the monitors do not. It graphs the wall power, shows the cost per hour, day and month at the current draw, and what today and this month cost while the app ran. Plans for Korea (progressive home tiers with summer steps, or one flat price), the United States and Japan; every price lives in %APPDATA%\PyWinSystem\tariffs.json and an edit applies at once. Stepped prices count the PC on top of the rest of the home.
 * BIOS vendor, version and date, firmware type and Secure Boot state on the Hardware page.
-* Network adapters on the Hardware page, and a tray icon with Close to tray.
+* Network adapters on the Hardware page, a tray icon with Close to tray, and Auto hide menu, which shows the header only while the cursor is over the window.
 * Only performance counters are sampled, so an idle hard disk is not woken; the disk list is read at start and on request.
 * Auto, dark and light themes.
 
