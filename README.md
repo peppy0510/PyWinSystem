@@ -19,7 +19,7 @@
 
 ## Screenshot
 
-![screenshot](/assets/images/screenshot-001.png)
+![screenshot](/assets/images/screenshot-2fc6b99e.png)
 
 ## How to install
 
