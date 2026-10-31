@@ -25,6 +25,9 @@ from utilities import draw_text_in
 from utilities import get_font
 
 
+CHANNEL_NAMES = {1: 'Single channel', 2: 'Dual channel', 3: 'Triple channel',
+                 4: 'Quad channel', 6: 'Hexa channel', 8: 'Octa channel'}
+
 # socket outlines in a 30 x 10 box; the shape tells DisplayPort from HDMI at a glance
 PORT_WIDTH = 30
 PORT_HEIGHT = 10
@@ -176,8 +179,26 @@ class HardwareBox(ScrollArea):
         panels.append(self.add_panel('cpu', 'Processor', body))
 
         modules = found['memory']
-        body = [ValueCard(board, theme, module['slot'] or 'Module', describe_module(module),
-                          format_bytes(module['size'])) for module in modules]
+        body = []
+        channels = hardware.read_channels(modules)
+        if channels:
+            name = CHANNEL_NAMES.get(channels['count'], f'{channels["count"]}-channel')
+            speed = f'{channels["speed"]} MT/s'
+            if channels['rated'] and channels['rated'] != channels['speed']:
+                speed += f' of {channels["rated"]} rated'
+            body.append(ValueCard(board, theme, name, join(
+                f'{channels["modules"]} modules in {channels["count"]} channels', speed,
+                'peak = MT/s × 8 bytes × channels'),
+                f'{channels["bandwidth"] / 10 ** 9:.1f} GB/s'))
+        controllers = {channel[0] for channel in map(hardware.get_channel, modules) if channel}
+        for module in modules:
+            label = module['slot'] or 'Module'
+            channel = hardware.get_channel(module)
+            if channel:
+                owner = f'P{channel[0]} ' if len(controllers) > 1 else ''
+                label = f'{owner}Channel {channel[1]} · {label}'
+            body.append(ValueCard(board, theme, label, describe_module(module),
+                                  format_bytes(module['size'])))
         panels.append(self.add_panel('memory', 'Memory', body, join(
             format_bytes(found['total']), f'{len(modules)} modules' if modules else '')))
 

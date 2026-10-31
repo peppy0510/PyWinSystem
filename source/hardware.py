@@ -9,6 +9,7 @@ email: peppy0510@hotmail.com
 
 import ctypes
 import platform
+import re
 import winreg
 
 import psutil
@@ -92,10 +93,11 @@ def read_wmi():
     service = win32com.client.GetObject(r'winmgmts:\\.\root\cimv2')
     modules = []
     for item in query(service, 'SELECT Capacity, Speed, ConfiguredClockSpeed, Manufacturer, '
-                               'PartNumber, DeviceLocator, SMBIOSMemoryType '
+                               'PartNumber, DeviceLocator, BankLabel, SMBIOSMemoryType '
                                'FROM Win32_PhysicalMemory'):
         modules.append({
             'slot': (item.DeviceLocator or '').strip(),
+            'bank': (item.BankLabel or '').strip(),
             'size': int(item.Capacity or 0),
             'speed': item.Speed,
             'configured': item.ConfiguredClockSpeed,
@@ -137,6 +139,37 @@ def read_wmi():
 
 def join_parts(*parts):
     return ' '.join(str(part).strip() for part in parts if part)
+
+
+# boards name the channel in the bank or the slot: 'P0 CHANNEL A', 'ChannelA-DIMM0',
+# 'Controller1-ChannelA-DIMM0', 'DIMM_A1'; the controller or socket in front keeps two
+# controllers' channel A apart
+CHANNEL = re.compile(r'(?:CHANNEL\s*|DIMM[_ ]?)([A-H])(?![A-Z])', re.I)
+CONTROLLER = re.compile(r'(?:P|CONTROLLER|NODE)\s*(\d+)', re.I)
+
+
+def get_channel(module):
+    for text in (module.get('bank'), module.get('slot')):
+        found = CHANNEL.search(text or '')
+        if found:
+            owner = CONTROLLER.search(text) or CONTROLLER.search(module.get('bank') or '')
+            return (owner.group(1) if owner else '0'), found.group(1).upper()
+    return None
+
+
+# channel count, the speed the modules run at, and the bandwidth that makes in theory:
+# MT/s x 8 bytes x channels. None when the slot names do not say the channel
+def read_channels(modules):
+    channels = [get_channel(module) for module in modules if module.get('size')]
+    if not channels or None in channels:
+        return None
+    speeds = [module.get('configured') or module.get('speed') or 0 for module in modules]
+    rated = [module.get('speed') or 0 for module in modules]
+    count = len(set(channels))
+    speed = min(speed for speed in speeds if speed) if any(speeds) else 0
+    return {'count': count, 'modules': len(channels), 'speed': speed,
+            'rated': min(rate for rate in rated if rate) if any(rated) else 0,
+            'bandwidth': speed * 10 ** 6 * 8 * count}
 
 
 def read_nvidia():
