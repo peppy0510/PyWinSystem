@@ -19,7 +19,7 @@
 
 ## Screenshot
 
-![screenshot](/assets/images/screenshot-2fc6b99e.png)
+![screenshot](/assets/images/screenshot-f2dfb36a.webp)
 
 ## How to install
 
