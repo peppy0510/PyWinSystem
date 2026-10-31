@@ -474,6 +474,8 @@ class CardBase(Pressable):
     # 'value' and 'description' copy their text when clicked
     copyable = ()
     copied = None
+    # with copyable text beside it, the button lights only under the pointer
+    over_control = False
 
     def __init__(self, parent, theme, label, description, on_change=None):
         super().__init__(parent, theme, self.on_press)
@@ -527,8 +529,17 @@ class CardBase(Pressable):
         return width
 
     def on_track(self, event):
+        if self.copyable:
+            over = self.is_over_control(event.GetPosition())
+            if over != self.over_control:
+                self.over_control = over
+                self.Refresh()
         super().on_track(event)
         self.update_label_tip(self.ClientToScreen(event.GetPosition()))
+
+    def is_over_control(self, position):
+        rect = self.get_hit()
+        return rect is not None and rect.Contains(position)
 
     def on_leave(self, event):
         super().on_leave(event)
@@ -604,6 +615,9 @@ class CardBase(Pressable):
         self.clipped = wx.Rect(self.PADDING, top - 4, int(limit), block + 8) if cut else None
 
     def get_state(self):
+        if self.copyable and not self.is_over_control(
+                self.ScreenToClient(wx.GetMousePosition())):
+            return 'plain'
         if self.pressed:
             return 'down'
         return 'hover' if self.hovered else 'plain'
