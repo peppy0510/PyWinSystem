@@ -1,5 +1,6 @@
 nvidia-ml-py
 pillow
 psutil
+pyinstaller
 pywin32
 wxpython

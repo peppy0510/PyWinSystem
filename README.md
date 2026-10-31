@@ -22,7 +22,9 @@
 
 ## How to install
 
-* Download or clone a repository, install Python packages in the requirements.pip file, then execute source/main.pyw with pythonw.exe. Python 3.x is required.
+* Just download and install the latest release.
+* Alternatively, if you like to build your own, download or clone a repository then execute makebuild.py. Python 3.x, Python packages in the requirements.pip file, PyInstaller and Inno Setup are required.
+* To run from the source, install Python packages in the requirements.pip file, then execute source/main.pyw with pythonw.exe.
 * GPU figures need an NVIDIA driver (NVML).
 * Execute source/makeshortcut.py to put a shortcut in the Start menu.
 
