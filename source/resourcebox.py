@@ -146,6 +146,7 @@ class ResourceBox(ScrollArea):
         release, version = platform.release(), platform.version()
         cards['host'] = ValueCard(board, theme, 'Hostname',
                                   f'Windows {release} · build {version}', socket.gethostname())
+        cards['host'].copyable = ('value',)
         cards['uptime'] = ValueCard(board, theme, 'Uptime')
         panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
         panels.append(self.add_panel('sensors', 'Temperature and power',
@@ -202,12 +203,15 @@ class ResourceBox(ScrollArea):
         body = []
         for name in data['networks']:
             body.append(rate('net:' + name, name, names=('Down', 'Up')))
+            cards['net:' + name].copyable = ('description',)
             for key, label in (('private', 'Private IP'), ('gateway', 'Gateway'), ('dns', 'DNS')):
                 cards[f'{key}:{name}'] = ValueCard(board, theme, label)
+                cards[f'{key}:{name}'].copyable = ('value', 'description')
                 body.append(cards[f'{key}:{name}'])
         cards['public'] = ValueActionCard(board, theme, 'Public IP', PUBLIC_NOTE, 'Look up',
                                           self.look_up)
         cards['public'].set_value(self.public_ip or '')
+        cards['public'].copyable = ('value',)
         cards['public'].set_captions('Looking up')
         body.append(cards['public'])
         if wsl:

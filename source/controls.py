@@ -40,6 +40,10 @@ from utilities import get_text_width
 from utilities import shade
 
 
+COPIED = 'Copied'
+COPIED_MS = 1500
+
+
 class Pressable(Canvas):
 
     def __init__(self, parent, theme, on_click):
@@ -467,13 +471,52 @@ class CardBase(Pressable):
     last = True
     # where the label and description sit when either is cut short, else None
     clipped = None
+    # 'value' and 'description' copy their text when clicked
+    copyable = ()
+    copied = None
 
     def __init__(self, parent, theme, label, description, on_change=None):
-        super().__init__(parent, theme, self.activate)
+        super().__init__(parent, theme, self.on_press)
         self.label = label
         self.description = description
         self.on_change = on_change
+        self.copy_rects = {}
         self.SetMinSize(wx.Size(-1, CARD_HEIGHT))
+
+    def hits(self, position):
+        return super().hits(position) or self.get_copy_key(position) is not None
+
+    def get_copy_key(self, position):
+        for key, rect in self.copy_rects.items():
+            if key in self.copyable and rect.Contains(position):
+                return key
+        return None
+
+    def get_copy_text(self, key):
+        return self.description if key == 'description' else None
+
+    def on_press(self):
+        key = self.get_copy_key(self.up_position)
+        if key is None:
+            self.activate()
+            return
+        text = self.get_copy_text(key)
+        if text and text != '—' and wx.TheClipboard.Open():
+            wx.TheClipboard.SetData(wx.TextDataObject(text))
+            # the text stays on the clipboard after the app quits
+            wx.TheClipboard.Flush()
+            wx.TheClipboard.Close()
+            self.copied = key
+            wx.CallLater(COPIED_MS, self.clear_copied, key)
+            self.Refresh()
+
+    def clear_copied(self, key):
+        if self and self.copied == key:
+            self.copied = None
+            self.Refresh()
+
+    def get_shown(self, key, text):
+        return COPIED if self.copied == key else text
 
     def on_track(self, event):
         super().on_track(event)
@@ -521,6 +564,7 @@ class CardBase(Pressable):
     def draw(self, gc, width, height):
         theme = self.theme
         draw_row_face(gc, theme, width, height, self.first, self.last)
+        self.copy_rects = {}
         label_right = self.draw_control(gc, width, height) - self.LABEL_GAP
         self.draw_label(gc, height, max(0, label_right - self.PADDING))
 
@@ -542,9 +586,13 @@ class CardBase(Pressable):
         if self.description:
             gc.SetFont(note_font, wx.Colour(theme['dim']))
             description = self.fit_text(gc, self.description, limit)
-            gc.DrawText(description, self.PADDING,
-                        top + title_height + self.LINE_GAP - note_ink[0])
+            note_top = top + title_height + self.LINE_GAP
+            gc.DrawText(self.get_shown('description', description), self.PADDING,
+                        note_top - note_ink[0])
             cut = cut or description != self.description
+            self.copy_rects['description'] = wx.Rect(
+                self.PADDING, note_top - 3, int(gc.GetTextExtent(description)[0]) + 1,
+                note_height + 6)
         self.clipped = wx.Rect(self.PADDING, top - 4, int(limit), block + 8) if cut else None
 
     def get_state(self):

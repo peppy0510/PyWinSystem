@@ -18,6 +18,7 @@ from hovertip import hide_hover_tip
 from hovertip import show_hover_tip
 from utilities import fill_rect
 from utilities import get_font
+from utilities import get_text_top
 from utilities import get_text_width
 from utilities import mix
 
@@ -204,11 +205,16 @@ class ValueCard(ReadoutCard):
         if changed:
             self.Refresh()
 
+    def get_copy_text(self, key):
+        return self.value if key == 'value' else super().get_copy_text(key)
+
     def draw_control(self, gc, width, height):
         right = width - self.PADDING
         if not self.value:
             return right
-        drawn = self.draw_value(gc, self.value, right, height / 2, 'warn' if self.warn else 'text')
+        drawn = self.draw_value(gc, self.get_shown('value', self.value), right, height / 2,
+                                'warn' if self.warn else 'text')
+        self.copy_rects['value'] = wx.Rect(int(right - drawn), 0, int(drawn) + 1, height)
         # no picture here, so a long label may run into the empty slot
         return right - drawn
 
@@ -231,14 +237,21 @@ class ValueActionCard(ActionCard):
         if changed:
             self.Refresh()
 
+    def get_copy_text(self, key):
+        return self.value if key == 'value' else super().get_copy_text(key)
+
     def draw_control(self, gc, width, height):
         left = super().draw_control(gc, width, height)
         if not self.value:
             return left
         font = get_font(VALUE_FONT, bold=True)
         gc.SetFont(font, wx.Colour(self.theme['text']))
-        left -= SLOT_GAP + get_text_width(font, self.value)
-        gc.DrawText(self.value, left, (height - gc.GetTextExtent(self.value)[1]) / 2)
+        text = self.get_shown('value', self.value)
+        left -= SLOT_GAP + get_text_width(font, text)
+        # centred on the ink like the button text beside it
+        gc.DrawText(text, left, get_text_top(font, 0, height))
+        self.copy_rects['value'] = wx.Rect(int(left), 0, int(get_text_width(font, text)) + 1,
+                                           height)
         return left
 
 
@@ -357,6 +370,8 @@ class RateCard(ReadoutCard):
         if hover != self.hover:
             self.hover = hover
             self.Refresh()
+        # a copyable description takes the hand cursor
+        self.set_hovered(self.hits(position))
         self.update_tip(self.ClientToScreen(position))
         event.Skip()
 
