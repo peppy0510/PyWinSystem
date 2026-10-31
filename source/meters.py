@@ -213,8 +213,11 @@ class ValueCard(ReadoutCard):
         right = width - self.PADDING
         if not self.value:
             return right
-        drawn = self.draw_value(gc, self.get_shown('value', self.value), right, height / 2,
-                                'warn' if self.warn else 'text')
+        if self.copied == 'value':
+            drawn = self.draw_copied(gc, right, height)
+        else:
+            drawn = self.draw_value(gc, self.value, right, height / 2,
+                                    'warn' if self.warn else 'text')
         self.copy_rects['value'] = wx.Rect(int(right - drawn), 0, int(drawn) + 1, height)
         # no picture here, so a long label may run into the empty slot
         return right - drawn
@@ -245,8 +248,8 @@ class ValueActionCard(ActionCard):
         if not self.value:
             return 0
         # room for Copied too, so the button stays put while it shows
-        font = get_font(VALUE_FONT, bold=True)
-        return max(get_text_width(font, self.value), get_text_width(font, COPIED))
+        return max(get_text_width(get_font(VALUE_FONT, bold=True), self.value),
+                   get_text_width(get_font(8), COPIED))
 
     def get_control_rect(self, width, height):
         rect = super().get_control_rect(width, height)
@@ -259,13 +262,15 @@ class ValueActionCard(ActionCard):
         left = super().draw_control(gc, width, height)
         if not self.value:
             return left
-        font = get_font(VALUE_FONT, bold=True)
-        gc.SetFont(font, wx.Colour(self.theme['text']))
-        text = self.get_shown('value', self.value)
-        text_width = get_text_width(font, text)
         right = width - self.PADDING
-        # centred on the ink like the button text beside it
-        gc.DrawText(text, right - text_width, get_text_top(font, 0, height))
+        if self.copied == 'value':
+            text_width = self.draw_copied(gc, right, height)
+        else:
+            font = get_font(VALUE_FONT, bold=True)
+            gc.SetFont(font, wx.Colour(self.theme['text']))
+            text_width = get_text_width(font, self.value)
+            # centred on the ink like the button text beside it
+            gc.DrawText(self.value, right - text_width, get_text_top(font, 0, height))
         self.copy_rects['value'] = wx.Rect(int(right - text_width), 0, int(text_width) + 1,
                                            height)
         return left

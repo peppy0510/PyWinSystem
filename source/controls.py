@@ -518,6 +518,14 @@ class CardBase(Pressable):
     def get_shown(self, key, text):
         return COPIED if self.copied == key else text
 
+    # Copied looks the same wherever it shows: the description's small dim type
+    def draw_copied(self, gc, right, height):
+        font = get_font(8)
+        gc.SetFont(font, wx.Colour(self.theme['dim']))
+        width = get_text_width(font, COPIED)
+        gc.DrawText(COPIED, right - width, get_text_top(font, 0, height))
+        return width
+
     def on_track(self, event):
         super().on_track(event)
         self.update_label_tip(self.ClientToScreen(event.GetPosition()))
