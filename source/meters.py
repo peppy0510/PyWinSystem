@@ -11,6 +11,7 @@ import collections
 import re
 import wx
 
+from controls import COPIED
 from controls import ActionCard
 from controls import CardBase
 from controls import draw_row_face
@@ -222,7 +223,7 @@ class ValueCard(ReadoutCard):
         return self.draw_control(gc, width, height) if self.value else None
 
 
-# a value drawn like ValueCard's, with a button to its right
+# a value at the right edge like ValueCard's, with a button to its left
 class ValueActionCard(ActionCard):
 
     value = ''
@@ -240,6 +241,20 @@ class ValueActionCard(ActionCard):
     def get_copy_text(self, key):
         return self.value if key == 'value' else super().get_copy_text(key)
 
+    def get_value_width(self):
+        if not self.value:
+            return 0
+        # room for Copied too, so the button stays put while it shows
+        font = get_font(VALUE_FONT, bold=True)
+        return max(get_text_width(font, self.value), get_text_width(font, COPIED))
+
+    def get_control_rect(self, width, height):
+        rect = super().get_control_rect(width, height)
+        reserve = self.get_value_width()
+        if reserve:
+            rect.x -= reserve + SLOT_GAP
+        return rect
+
     def draw_control(self, gc, width, height):
         left = super().draw_control(gc, width, height)
         if not self.value:
@@ -247,10 +262,11 @@ class ValueActionCard(ActionCard):
         font = get_font(VALUE_FONT, bold=True)
         gc.SetFont(font, wx.Colour(self.theme['text']))
         text = self.get_shown('value', self.value)
-        left -= SLOT_GAP + get_text_width(font, text)
+        text_width = get_text_width(font, text)
+        right = width - self.PADDING
         # centred on the ink like the button text beside it
-        gc.DrawText(text, left, get_text_top(font, 0, height))
-        self.copy_rects['value'] = wx.Rect(int(left), 0, int(get_text_width(font, text)) + 1,
+        gc.DrawText(text, right - text_width, get_text_top(font, 0, height))
+        self.copy_rects['value'] = wx.Rect(int(right - text_width), 0, int(text_width) + 1,
                                            height)
         return left
 
