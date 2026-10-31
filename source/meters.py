@@ -11,6 +11,7 @@ import collections
 import re
 import wx
 
+from controls import ActionCard
 from controls import CardBase
 from controls import draw_row_face
 from hovertip import hide_hover_tip
@@ -213,6 +214,32 @@ class ValueCard(ReadoutCard):
 
     def draw_summary(self, gc, width, height):
         return self.draw_control(gc, width, height) if self.value else None
+
+
+# a value drawn like ValueCard's, with a button to its right
+class ValueActionCard(ActionCard):
+
+    value = ''
+
+    def set_value(self, value, description=None):
+        changed = description is not None and description != self.description
+        if changed:
+            self.description = description
+        if value != self.value:
+            self.value = value
+            changed = True
+        if changed:
+            self.Refresh()
+
+    def draw_control(self, gc, width, height):
+        left = super().draw_control(gc, width, height)
+        if not self.value:
+            return left
+        font = get_font(VALUE_FONT, bold=True)
+        gc.SetFont(font, wx.Colour(self.theme['text']))
+        left -= SLOT_GAP + get_text_width(font, self.value)
+        gc.DrawText(self.value, left, (height - gc.GetTextExtent(self.value)[1]) / 2)
+        return left
 
 
 class MeterCard(ReadoutCard):

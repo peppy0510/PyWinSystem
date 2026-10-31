@@ -19,7 +19,6 @@ import wx
 import energy
 import netinfo
 
-from controls import ActionCard
 from controls import Panel
 from controls import ScrollArea
 from meters import CoreCard
@@ -27,6 +26,7 @@ from meters import GraphCard
 from meters import MeterCard
 from meters import BUSY_DELAY
 from meters import RateCard
+from meters import ValueActionCard
 from meters import ValueCard
 from meters import format_bytes
 from meters import format_rate
@@ -40,6 +40,7 @@ HDD_ASLEEP = 0.8
 MONITOR_OFF = 0.3
 # a row graph is only about 100 px wide, so it shows the last minute
 ROW_HISTORY = 60
+PUBLIC_NOTE = 'Asks cloudflare.com once each time you press it'
 
 
 def format_uptime(seconds):
@@ -198,9 +199,15 @@ class ResourceBox(ScrollArea):
         body.append(graph('graph.disk', 'Physical disks over time'))
         panels.append(self.add_panel('disk', 'Disk I/O', body))
 
-        body = [rate('net:' + name, name, names=('Down', 'Up')) for name in data['networks']]
-        cards['public'] = ActionCard(board, theme, 'Public IP', self.get_public_text(), 'Look up',
-                                     self.look_up)
+        body = []
+        for name in data['networks']:
+            body.append(rate('net:' + name, name, names=('Down', 'Up')))
+            for key, label in (('private', 'Private IP'), ('gateway', 'Gateway'), ('dns', 'DNS')):
+                cards[f'{key}:{name}'] = ValueCard(board, theme, label)
+                body.append(cards[f'{key}:{name}'])
+        cards['public'] = ValueActionCard(board, theme, 'Public IP', PUBLIC_NOTE, 'Look up',
+                                          self.look_up)
+        cards['public'].set_value(self.public_ip or '')
         cards['public'].set_captions('Looking up')
         body.append(cards['public'])
         if wsl:
@@ -441,8 +448,13 @@ class ResourceBox(ScrollArea):
             cards['disk:' + name].set_rates(pair, interval=self.interval)
         addresses = data.get('addresses') or {}
         for name, pair in data['networks'].items():
-            cards['net:' + name].set_rates(pair, netinfo.describe(addresses.get(name)),
-                                           self.interval)
+            entry = addresses.get(name)
+            cards['net:' + name].set_rates(pair, netinfo.describe(entry), self.interval)
+            for key, (value, description) in (
+                    ('private', netinfo.get_private(entry)),
+                    ('gateway', netinfo.get_pair(entry['gateways']) if entry else ('', '')),
+                    ('dns', netinfo.get_pair(entry['dns']) if entry else ('', ''))):
+                cards[f'{key}:{name}'].set_value(value or '—', description)
 
         if wsl:
             self.set_wsl(wsl, cpu)
@@ -452,11 +464,6 @@ class ResourceBox(ScrollArea):
         for header in self.headers:
             if header.folded:
                 header.Refresh()
-
-    def get_public_text(self):
-        if self.public_ip:
-            return self.public_ip
-        return 'Asks cloudflare.com once each time you press it'
 
     def look_up(self):
         if self.looking_up:
@@ -486,7 +493,8 @@ class ResourceBox(ScrollArea):
             self.public_ip = address
         if card:
             card.set_caption('Look up')
-            card.set_description(self.get_public_text() if address else 'No answer · try again')
+            note = PUBLIC_NOTE if address else 'No answer · try again'
+            card.set_value(self.public_ip or '', note)
 
     def set_interval(self, interval):
         self.interval = float(interval)
