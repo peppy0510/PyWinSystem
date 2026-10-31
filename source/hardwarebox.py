@@ -104,8 +104,9 @@ class SocketRow(CardBase):
         self.port_rects = []
         for index, port in enumerate(self.ports):
             x = left + index * (PORT_WIDTH + PORT_GAP)
+            # quiet like the rest of the page: a plugged socket is filled grey, not lit
             if port['used']:
-                fill, edge, ink = theme['accent'], theme['accent'], theme['text']
+                fill, edge, ink = theme['control'], theme['dim'], theme['dim']
             else:
                 fill, edge, ink = None, theme['edge'], theme['faint']
             path = gc.CreatePath()
@@ -122,7 +123,7 @@ class SocketRow(CardBase):
             rect = wx.Rect(int(x - PORT_GAP / 2), int(top + PORT_HEIGHT + 4),
                            PORT_WIDTH + PORT_GAP, 14)
             draw_text_in(gc, monitors.get_port_name(port['output'], port['connector']), rect,
-                         get_font(8, port['used']), ink, back=theme['face'])
+                         get_font(8), ink, back=theme['face'])
             self.port_rects.append((wx.Rect(int(x - PORT_GAP / 2), int(top - 4),
                                             PORT_WIDTH + PORT_GAP, PORT_HEIGHT + 22), port))
         return left - PORT_GAP / 2
