@@ -20,7 +20,7 @@
 
 ## Screenshot
 
-![screenshot](/assets/images/screenshot-f2dfb36a.webp)
+![screenshot](/assets/images/screenshot-dce11d1b.webp)
 
 ## How to install
 
