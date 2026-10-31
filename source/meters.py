@@ -271,10 +271,11 @@ class MeterCard(ReadoutCard):
         if self.hover:
             self.hover = False
             self.update_tip()
+        hide_hover_tip(self)
 
     def update_tip(self, point=None):
         if not self.hover or self.value is None:
-            hide_hover_tip(self)
+            self.update_label_tip(point)
             return
         lines = [(self.label, 'dim'), (f'Used  {format_ratio(self.value)}', 'text')]
         if self.share is not None:
@@ -364,11 +365,12 @@ class RateCard(ReadoutCard):
             self.hover = None
             self.Refresh()
             self.update_tip()
+        hide_hover_tip(self)
 
     def update_tip(self, point=None):
         sample = self.get_sample()
         if sample is None:
-            hide_hover_tip(self)
+            self.update_label_tip(point)
             return
         index, scale = sample[0], self.get_scale()
         lines = [(format_ago((len(self.history[0]) - 1 - index) * self.interval), 'dim')]
@@ -439,6 +441,7 @@ class CoreCard(ReadoutCard):
             self.hover = None
             self.Refresh()
             self.update_tip()
+        hide_hover_tip(self)
 
     def set_values(self, values):
         values = [round(value) for value in values]
@@ -449,7 +452,7 @@ class CoreCard(ReadoutCard):
 
     def update_tip(self, point=None):
         if self.hover is None or self.hover >= len(self.values):
-            hide_hover_tip(self)
+            self.update_label_tip(point)
             return
         show_hover_tip(self, self.theme, [(f'Processor {int(self.hover)}', 'dim'),
                                           (f'Load  {int(self.values[self.hover])}%', 'text')],
@@ -525,6 +528,7 @@ class GraphCard(ReadoutCard):
             self.hover = None
             self.Refresh()
             self.update_tip()
+        hide_hover_tip(self)
 
     def get_sample(self, plot):
         if not self.series:
@@ -534,7 +538,7 @@ class GraphCard(ReadoutCard):
     def update_tip(self, point=None):
         sample = self.get_sample(self.get_plot(*self.GetClientSize()))
         if sample is None:
-            hide_hover_tip(self)
+            self.update_label_tip(point)
             return
         index, length = sample[0], len(self.series[0][1])
         lines = [(format_ago((length - 1 - index) * self.interval), 'dim')]

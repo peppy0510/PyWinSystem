@@ -12,6 +12,8 @@ import time
 import re
 import wx
 
+from hovertip import hide_hover_tip
+from hovertip import show_hover_tip
 from utilities import BAND_INSET
 from utilities import BUTTON_FONT
 from utilities import BUTTON_GAP
@@ -463,6 +465,8 @@ class CardBase(Pressable):
     LINE_GAP = 6
     first = True
     last = True
+    # where the label and description sit when either is cut short, else None
+    clipped = None
 
     def __init__(self, parent, theme, label, description, on_change=None):
         super().__init__(parent, theme, self.activate)
@@ -470,6 +474,30 @@ class CardBase(Pressable):
         self.description = description
         self.on_change = on_change
         self.SetMinSize(wx.Size(-1, CARD_HEIGHT))
+
+    def on_track(self, event):
+        super().on_track(event)
+        self.update_label_tip(self.ClientToScreen(event.GetPosition()))
+
+    def on_leave(self, event):
+        super().on_leave(event)
+        hide_hover_tip(self)
+
+    # the full label for a pointer resting on a cut-short one; subclasses with their own
+    # readouts call this where they would hide the tip
+    def update_label_tip(self, point=None):
+        if point is None:
+            point = wx.GetMousePosition()
+            if wx.FindWindowAtPoint(point) is not self:
+                hide_hover_tip(self)
+                return
+        if not self.clipped or not self.clipped.Contains(self.ScreenToClient(point)):
+            hide_hover_tip(self)
+            return
+        lines = [(self.label, 'text')]
+        if self.description:
+            lines.append((self.description, 'dim'))
+        show_hover_tip(self, self.theme, lines, point)
 
     def activate(self):
         pass
@@ -508,11 +536,16 @@ class CardBase(Pressable):
             block = title_height
         top = (height - block) // 2
         gc.SetFont(title_font, wx.Colour(theme['text']))
-        gc.DrawText(self.fit_text(gc, self.label, limit), self.PADDING, top - title_ink[0])
+        label = self.fit_text(gc, self.label, limit)
+        gc.DrawText(label, self.PADDING, top - title_ink[0])
+        cut = label != self.label
         if self.description:
             gc.SetFont(note_font, wx.Colour(theme['dim']))
-            gc.DrawText(self.fit_text(gc, self.description, limit), self.PADDING,
+            description = self.fit_text(gc, self.description, limit)
+            gc.DrawText(description, self.PADDING,
                         top + title_height + self.LINE_GAP - note_ink[0])
+            cut = cut or description != self.description
+        self.clipped = wx.Rect(self.PADDING, top - 4, int(limit), block + 8) if cut else None
 
     def get_state(self):
         if self.pressed:
