@@ -345,14 +345,29 @@ class PanelHeader(Pressable):
         self.subtitle = subtitle
         self.folded = False
         self.edge = None
-        self.SetToolTip('Fold')
         self.update_height()
 
     def set_folded(self, folded):
         self.folded = folded
-        self.SetToolTip('Unfold' if folded else 'Fold')
         self.update_height()
         self.Refresh()
+        self.update_tip()
+
+    # the native tooltip ignores the theme, so Fold and Unfold use the hover tip
+    def update_tip(self, point=None):
+        if self.hovered:
+            show_hover_tip(self, self.theme, [('Unfold' if self.folded else 'Fold', 'text')],
+                           point)
+        else:
+            hide_hover_tip(self)
+
+    def on_track(self, event):
+        super().on_track(event)
+        self.update_tip(self.ClientToScreen(event.GetPosition()))
+
+    def on_leave(self, event):
+        super().on_leave(event)
+        hide_hover_tip(self)
 
     def set_subtitle(self, subtitle):
         if subtitle != self.subtitle:
