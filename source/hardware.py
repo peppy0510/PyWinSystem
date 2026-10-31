@@ -18,6 +18,16 @@ CPU_KEY = r'HARDWARE\DESCRIPTION\System\CentralProcessor\0'
 SECURE_BOOT_KEY = r'SYSTEM\CurrentControlSet\Control\SecureBoot\State'
 FIRMWARE_TYPES = {1: 'Legacy BIOS', 2: 'UEFI'}
 MEMORY_TYPES = {20: 'DDR', 21: 'DDR2', 24: 'DDR3', 26: 'DDR4', 34: 'DDR5', 35: 'LPDDR5'}
+WINDOWS_KEY = r'SOFTWARE\Microsoft\Windows NT\CurrentVersion'
+# ProductName still says Windows 10 on Windows 11, so the build decides
+WINDOWS_11_BUILD = 22000
+EDITIONS = {'Core': 'Home', 'CoreN': 'Home N', 'CoreSingleLanguage': 'Home Single Language',
+            'Professional': 'Pro', 'ProfessionalN': 'Pro N',
+            'ProfessionalWorkstation': 'Pro for Workstations',
+            'ProfessionalEducation': 'Pro Education', 'Enterprise': 'Enterprise',
+            'EnterpriseS': 'Enterprise LTSC', 'Education': 'Education',
+            'IoTEnterprise': 'IoT Enterprise', 'ServerStandard': 'Server Standard',
+            'ServerDatacenter': 'Server Datacenter'}
 
 
 def read_cpu():
@@ -30,6 +40,29 @@ def read_cpu():
     except OSError:
         pass
     return cpu
+
+
+# one registry key, well under a millisecond
+def read_windows():
+    values = {}
+    try:
+        with winreg.OpenKey(winreg.HKEY_LOCAL_MACHINE, WINDOWS_KEY) as key:
+            for name in ('CurrentBuild', 'UBR', 'DisplayVersion', 'EditionID'):
+                try:
+                    values[name] = winreg.QueryValueEx(key, name)[0]
+                except OSError:
+                    pass
+    except OSError:
+        return f'Windows {platform.release()}', f'build {platform.version()}'
+    build = str(values.get('CurrentBuild') or platform.version().split('.')[-1])
+    major = '11' if build.isdigit() and int(build) >= WINDOWS_11_BUILD else platform.release()
+    edition = values.get('EditionID')
+    name = ' '.join(part for part in (f'Windows {major}', EDITIONS.get(edition, edition))
+                    if part)
+    if 'UBR' in values:
+        build += f'.{values["UBR"]}'
+    return name, ' · '.join(part for part in (values.get('DisplayVersion'), f'build {build}')
+                            if part)
 
 
 def read_firmware():

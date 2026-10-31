@@ -10,13 +10,13 @@ email: peppy0510@hotmail.com
 import collections
 import functools
 import os
-import platform
 import socket
 import threading
 import time
 import wx
 
 import energy
+import hardware
 import netinfo
 
 from controls import Panel
@@ -143,9 +143,8 @@ class ResourceBox(ScrollArea):
             cards[key] = RateCard(board, theme, label, description, names, ROW_HISTORY)
             return cards[key]
 
-        release, version = platform.release(), platform.version()
-        cards['host'] = ValueCard(board, theme, 'Hostname',
-                                  f'Windows {release} · build {version}', socket.gethostname())
+        cards['host'] = ValueCard(board, theme, 'Hostname', ' · '.join(hardware.read_windows()),
+                                  socket.gethostname())
         cards['host'].copyable = ('value',)
         cards['uptime'] = ValueCard(board, theme, 'Uptime')
         panels.append(self.add_panel('system', 'System', [cards['host'], cards['uptime']]))
