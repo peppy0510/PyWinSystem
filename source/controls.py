@@ -338,6 +338,8 @@ class PanelHeader(Pressable):
     # summary(gc, width, height) draws a folded panel's contents in place of the subtitle and
     # returns the left edge it took, or None when it drew nothing
     summary = None
+    # where the title and subtitle sit when either is cut short, else None
+    clipped = None
 
     def __init__(self, parent, theme, title, subtitle, on_toggle):
         super().__init__(parent, theme, on_toggle)
@@ -353,9 +355,16 @@ class PanelHeader(Pressable):
         self.Refresh()
         self.update_tip()
 
-    # the native tooltip ignores the theme, so Fold and Unfold use the hover tip
+    # the native tooltip ignores the theme, so Fold and Unfold use the hover tip; a title or
+    # subtitle cut short shows in full instead
     def update_tip(self, point=None):
-        if self.hovered:
+        point = point or wx.GetMousePosition()
+        if self.clipped and self.clipped.Contains(self.ScreenToClient(point)):
+            lines = [(self.title, 'text')]
+            if self.subtitle:
+                lines.append((self.subtitle, 'dim'))
+            show_hover_tip(self, self.theme, lines, point)
+        elif self.hovered:
             show_hover_tip(self, self.theme, [('Unfold' if self.folded else 'Fold', 'text')],
                            point)
         else:
@@ -416,6 +425,7 @@ class PanelHeader(Pressable):
         title = self.fit_text(gc, self.title, max(0, right - left))
         title_top = get_text_top(font, 0, HEADER_BAND)
         gc.DrawText(title, left, title_top)
+        cut, text_right = title != self.title, left + gc.GetTextExtent(title)[0]
         # the subtitle explains the rows, so a summing header shows it only while they show
         if self.subtitle and not summing:
             sub_font = get_font(8)
@@ -424,8 +434,13 @@ class PanelHeader(Pressable):
             if room > 12:
                 gc.SetFont(sub_font, wx.Colour(theme['dim']))
                 baseline = title_top + get_ink(font)[1]
-                gc.DrawText(self.fit_text(gc, self.subtitle, room), sub_left,
-                            baseline - get_ink(sub_font)[1])
+                subtitle = self.fit_text(gc, self.subtitle, room)
+                gc.DrawText(subtitle, sub_left, baseline - get_ink(sub_font)[1])
+                cut = cut or subtitle != self.subtitle
+                text_right = sub_left + gc.GetTextExtent(subtitle)[0]
+            else:
+                cut = True
+        self.clipped = wx.Rect(left, 0, int(text_right - left) + 1, HEADER_BAND) if cut else None
 
 
 class Panel:
