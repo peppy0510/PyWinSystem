@@ -781,8 +781,6 @@ class ChoiceCard(CardBase):
     # below this much room for the label, the buttons move under it and wrap
     LABEL_ROOM = 140
     BOTTOM_PAD = 12
-    # more choices than this always sit in a grid under the label
-    INLINE_LIMIT = 3
 
     def __init__(self, parent, theme, label, description, options, on_change=None):
         super().__init__(parent, theme, label, description, on_change)
@@ -795,11 +793,9 @@ class ChoiceCard(CardBase):
         # None while every button fits beside the label
         count = len(self.options)
         row = self.segment * count + BUTTON_GAP * (count - 1)
-        if (count <= self.INLINE_LIMIT
-                and row <= width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP):
+        if row <= width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP:
             return None
-        columns = (width - self.PADDING * 2 + BUTTON_GAP) // (self.segment + BUTTON_GAP)
-        return max(1, min(count, columns))
+        return max(1, (width - self.PADDING * 2 + BUTTON_GAP) // (self.segment + BUTTON_GAP))
 
     def get_needed_height(self, width):
         columns = self.get_columns(width)
@@ -839,13 +835,13 @@ class ChoiceCard(CardBase):
         count = len(self.options)
         columns = self.get_columns(width)
         if columns is not None:
-            # the cells share the full width, so the grid lines up with the card edges
+            # each row sits at the right edge, like the single row it wraps from
             row, column = divmod(index, columns)
-            room = width - self.PADDING * 2 - BUTTON_GAP * (columns - 1)
-            left = self.PADDING + column * BUTTON_GAP + room * column // columns
-            right = self.PADDING + column * BUTTON_GAP + room * (column + 1) // columns
-            return wx.Rect(left, CARD_HEIGHT + (BUTTON_HEIGHT + BUTTON_GAP) * row,
-                           right - left, BUTTON_HEIGHT)
+            in_row = min(columns, count - row * columns)
+            left = width - self.PADDING - self.segment * in_row - BUTTON_GAP * (in_row - 1)
+            return wx.Rect(left + (self.segment + BUTTON_GAP) * column,
+                           CARD_HEIGHT + (BUTTON_HEIGHT + BUTTON_GAP) * row,
+                           self.segment, BUTTON_HEIGHT)
         left = width - self.PADDING - self.segment * count - BUTTON_GAP * (count - 1)
         return wx.Rect(left + (self.segment + BUTTON_GAP) * index, (height - BUTTON_HEIGHT) // 2,
                        self.segment, BUTTON_HEIGHT)
