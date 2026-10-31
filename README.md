@@ -6,6 +6,7 @@
 * What WSL takes of each: its CPU and memory against the `.wslconfig` limits, the memory its VM holds on Windows, and its disk and network traffic.
 * MAC, private IP, gateway and DNS of each adapter; the public IP is asked from cloudflare.com only when you press Look up. A label or description cut short shows in full in a tip. Click an address, a MAC or the host name to copy it.
 * Hardware page: processor, mainboard, each memory module with its part number and speed, and each display adapter with VRAM, PCIe link and driver.
+* Displays on the Hardware page: what each monitor reports in its EDID (vendor, product code, serial, date of manufacture, size), its resolution and refresh rate, and the graphics card and port it is plugged into. Under each graphics card its sockets in driver order, filled where a display is plugged in, with a tip naming the display.
 * Disk list with media, bus, size and the health Windows reports, Storage Spaces drives included.
 * Disk health: NVMe temperature, life used, spare, power-on time, data written and read, unsafe shutdowns and media errors without administrator rights; SATA SMART attributes after Run as administrator. A hard disk that is asleep is left asleep unless you press Read anyway.
 * GPU power against its limit, fan, core and memory clocks, and system uptime.

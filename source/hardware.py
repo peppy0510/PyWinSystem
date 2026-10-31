@@ -13,6 +13,8 @@ import winreg
 
 import psutil
 
+import monitors
+
 
 CPU_KEY = r'HARDWARE\DESCRIPTION\System\CentralProcessor\0'
 SECURE_BOOT_KEY = r'SYSTEM\CurrentControlSet\Control\SecureBoot\State'
@@ -174,4 +176,4 @@ def read_hardware():
             adapter['driver'] = driver or adapter['driver']
     return {'cpu': read_cpu(), 'memory': modules, 'total': psutil.virtual_memory().total,
             'gpus': adapters, 'board': board, 'nics': nics, 'bios': bios,
-            'firmware': read_firmware()}
+            'firmware': read_firmware(), 'monitors': monitors.read_monitors()}
