@@ -37,7 +37,8 @@ from utilities import load_settings
 from utilities import save_settings
 
 
-DEFAULT_SIZE = (460, 720)
+DEFAULT_SIZE = (480, 720)
+MIN_SIZE = (360, 480)
 
 MENU_ITEMS = (('Resources', 'chart'), ('Processes', 'list'), ('Hardware', 'chip'),
               ('Disks', 'disk'), None, ('Settings', 'settings'))
@@ -113,6 +114,7 @@ class MainFrame(wx.Frame):
         super().__init__(None, title=APP_NAME, size=wx.Size(*DEFAULT_SIZE),
                          style=FRAME_STYLE)
         apply_no_caption(self)
+        self.SetMinSize(wx.Size(*MIN_SIZE))
 
         self.theme_name = self.resolve_theme(settings.get('theme', 'dark'))
         theme = THEMES[self.theme_name]
@@ -302,6 +304,18 @@ class MainFrame(wx.Frame):
         self.SetFocus()
         self.sampler.visible = True
 
+    def hide_window(self):
+        if self.IsIconized() is False and self.IsMaximized() is False:
+            self.stored_rect = list(self.GetRect())
+        self.store_settings()
+        # a second launch may have shown the window behind wx's back
+        self.Show(True)
+        self.Hide()
+        self.sampler.visible = False
+
+    def get_tray_items(self):
+        return []
+
     def on_disks(self, found):
         self.resourcebox.set_disk_names(found)
         self.sampler.sampler.sensors.set_disks(found)
@@ -335,13 +349,7 @@ class MainFrame(wx.Frame):
         if (self.tray is not None and values['close_to_tray'] and not self.quitting
                 and event.CanVeto()):
             event.Veto()
-            if self.IsIconized() is False and self.IsMaximized() is False:
-                self.stored_rect = list(self.GetRect())
-            self.store_settings()
-            # a second launch may have shown the window behind wx's back
-            self.Show(True)
-            self.Hide()
-            self.sampler.visible = False
+            self.hide_window()
             return
         self.sampler.running = False
         self.header_timer.Stop()
