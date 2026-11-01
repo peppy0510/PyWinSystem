@@ -31,6 +31,23 @@ INTERVALS = ((1, '1 s'), (2, '2 s'), (5, '5 s'))
 PLANS = (('kr_home', 'KR home'), ('kr_flat', 'KR flat'), ('us', 'US'), ('jp', 'JP'))
 
 
+# read on each hover, as an edit to tariffs.json applies at once
+def get_plan_tip(key):
+    tariff = energy.load_tariffs().get(key)
+    if not tariff:
+        return None
+    symbol = energy.CURRENCIES.get(tariff.get('currency'), ('', 2))[0]
+    prices = ' / '.join(f'{symbol}{tier[2]:,g}' for tier in tariff.get('tiers') or [])
+    lines = [(tariff.get('name') or key, 'text')]
+    if prices:
+        steps = len(tariff['tiers'])
+        lines.append((f'{prices} per kWh' + (f' in {steps} steps' if steps > 1 else ''),
+                      'text'))
+    if tariff.get('note'):
+        lines.append((tariff['note'], 'dim'))
+    return lines
+
+
 class SettingsBox(ScrollArea):
 
     def __init__(self, parent, theme, settings, on_change, folds=None, on_fold=None):
@@ -53,7 +70,7 @@ class SettingsBox(ScrollArea):
                                    INTERVALS, on_change)
 
         self.plan = ChoiceCard(board, theme, 'Plan', 'Prices come from tariffs.json',
-                               PLANS, on_change)
+                               PLANS, on_change, get_plan_tip)
         self.household = SliderCard(board, theme, 'Rest of the home',
                                     'kWh a month without this device, for stepped prices',
                                     (0, 2000, 10, 0), on_change, default=250)

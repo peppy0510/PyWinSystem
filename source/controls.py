@@ -778,34 +778,50 @@ class ChoiceCard(CardBase):
 
     marked = -1
     down_index = -1
-    # below this much room for the label, the buttons move under it and wrap
+    # below this much room for the label, the buttons wrap into a grid at the right,
+    # beside the label
     LABEL_ROOM = 140
-    BOTTOM_PAD = 12
 
-    def __init__(self, parent, theme, label, description, options, on_change=None):
+    def __init__(self, parent, theme, label, description, options, on_change=None,
+                 tips=None):
         super().__init__(parent, theme, label, description, on_change)
         self.options = options
         self.value = options[0][0]
+        # tips: {value: [(text, ink)]}, or a function of the value when the text can change
+        # while the app runs
+        self.tips = tips or {}
         self.segment = max(get_button_width(name) for _, name in options)
         self.Bind(wx.EVT_SIZE, self.on_size)
 
+    def update_label_tip(self, point=None):
+        if 0 <= self.marked < len(self.options):
+            value = self.options[self.marked][0]
+            lines = self.tips(value) if callable(self.tips) else self.tips.get(value)
+            if lines:
+                show_hover_tip(self, self.theme, lines, point)
+                return
+        super().update_label_tip(point)
+
     def get_columns(self, width):
-        # None while every button fits beside the label
+        # None while every button fits beside the label in one row
         count = len(self.options)
-        row = self.segment * count + BUTTON_GAP * (count - 1)
-        if row <= width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP:
+        room = width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP
+        if self.segment * count + BUTTON_GAP * (count - 1) <= room:
             return None
-        return max(1, (width - self.PADDING * 2 + BUTTON_GAP) // (self.segment + BUTTON_GAP))
+        widest = max(1, min(count, (room + BUTTON_GAP) // (self.segment + BUTTON_GAP)))
+        # rows of even length: four buttons in three columns become two and two
+        rows = -(-count // widest)
+        return -(-count // rows)
+
+    def get_rows(self, width):
+        columns = self.get_columns(width)
+        return 1 if columns is None else -(-len(self.options) // columns)
 
     def get_needed_height(self, width):
-        columns = self.get_columns(width)
-        if columns is None:
-            return CARD_HEIGHT
-        rows = -(-len(self.options) // columns)
-        return CARD_HEIGHT + rows * BUTTON_HEIGHT + (rows - 1) * BUTTON_GAP + self.BOTTOM_PAD
-
-    def get_label_band(self, width, height):
-        return height if self.get_columns(width) is None else CARD_HEIGHT
+        rows = self.get_rows(width)
+        # the card keeps its own margin above and below the stacked rows
+        return max(CARD_HEIGHT, rows * BUTTON_HEIGHT + (rows - 1) * BUTTON_GAP
+                   + CARD_HEIGHT - BUTTON_HEIGHT)
 
     def on_size(self, event):
         event.Skip()
@@ -835,12 +851,14 @@ class ChoiceCard(CardBase):
         count = len(self.options)
         columns = self.get_columns(width)
         if columns is not None:
-            # each row sits at the right edge, like the single row it wraps from
+            # a grid beside the label, each row at the right edge like the row it wraps from
             row, column = divmod(index, columns)
             in_row = min(columns, count - row * columns)
+            rows = self.get_rows(width)
+            top = (height - rows * BUTTON_HEIGHT - (rows - 1) * BUTTON_GAP) // 2
             left = width - self.PADDING - self.segment * in_row - BUTTON_GAP * (in_row - 1)
             return wx.Rect(left + (self.segment + BUTTON_GAP) * column,
-                           CARD_HEIGHT + (BUTTON_HEIGHT + BUTTON_GAP) * row,
+                           top + (BUTTON_HEIGHT + BUTTON_GAP) * row,
                            self.segment, BUTTON_HEIGHT)
         left = width - self.PADDING - self.segment * count - BUTTON_GAP * (count - 1)
         return wx.Rect(left + (self.segment + BUTTON_GAP) * index, (height - BUTTON_HEIGHT) // 2,
@@ -891,9 +909,12 @@ class ChoiceCard(CardBase):
             else:
                 state = 'plain'
             draw_button(gc, self.theme, self.get_cell(index, width, height), name, state)
-        if self.get_columns(width) is not None:
-            return width - self.PADDING
+        columns = self.get_columns(width)
+        if columns is not None:
+            # the label ends where the widest row begins
+            return width - self.PADDING - self.segment * columns - BUTTON_GAP * (columns - 1)
         return self.get_cell(0, width, height).x
+
 
 
 NUMBER = re.compile(r'[-+]?\d+(?:\.\d+)?')
