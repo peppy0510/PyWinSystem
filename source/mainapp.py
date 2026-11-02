@@ -336,6 +336,7 @@ class MainFrame(wx.Frame):
     def on_sample(self, data):
         if self:
             self.resourcebox.set_data(data)
+            self.hardwarebox.set_clock(data.get('clock'))
 
     def on_processes(self, rows, now):
         if self:

@@ -10,16 +10,22 @@ email: peppy0510@hotmail.com
 import threading
 import wx
 
+import benchmarks
+import cpuinfo
 import hardware
 import monitors
 
 from controls import CardBase
 from controls import Panel
 from controls import ScrollArea
+from controls import draw_button
+from controls import get_button_width
 from controls import get_pen
 from hovertip import show_hover_tip
 from meters import ValueCard
 from meters import format_bytes
+from utilities import BUTTON_GAP
+from utilities import BUTTON_HEIGHT
 from utilities import call_painted
 from utilities import draw_text_in
 from utilities import get_font
@@ -149,7 +155,48 @@ def get_card_ports(found):
     return {name: list(ports.values()) for name, ports in cards.items()}
 
 
+class LinkCard(CardBase):
+    '''A row with a button per page to open in the browser.'''
+
+    def __init__(self, parent, theme, label, description, links):
+        super().__init__(parent, theme, label, description)
+        self.links = links
+        self.rects = []
+
+    def hits(self, position):
+        return any(rect.Contains(position) for rect, _ in self.rects)
+
+    def activate(self):
+        for rect, url in self.rects:
+            if rect.Contains(self.up_position):
+                benchmarks.open_page(url)
+                return
+
+    def on_track(self, event):
+        super().on_track(event)
+        # the light follows the button under the pointer, not the row
+        self.Refresh()
+
+    def draw_control(self, gc, width, height):
+        right = width - self.PADDING
+        mouse = self.ScreenToClient(wx.GetMousePosition())
+        rects = []
+        for caption, url in reversed(self.links):
+            button = get_button_width(caption)
+            rect = wx.Rect(right - button, (height - BUTTON_HEIGHT) // 2, button, BUTTON_HEIGHT)
+            over = self.hovered and rect.Contains(mouse)
+            draw_button(gc, self.theme, rect, caption,
+                        'down' if over and self.pressed else 'hover' if over else 'plain')
+            rects.insert(0, (rect, url))
+            right = rect.x - BUTTON_GAP
+        self.rects = rects
+        return right
+
+
 class HardwareBox(ScrollArea):
+
+    clock_card = None
+    base_mhz = None
 
     def __init__(self, parent, theme, folds=None, on_fold=None):
         super().__init__(parent, theme)
@@ -165,6 +212,46 @@ class HardwareBox(ScrollArea):
             call_painted(self, self.build, found)
         threading.Thread(target=work, daemon=True).start()
 
+    def get_cpu_rows(self, details, cpu):
+        board, theme = self.content, self.theme
+        rows = []
+        kinds = details.get('kinds', [])
+        names = ('P-cores', 'E-cores') if len(kinds) == 2 else ('Cores',)
+        for name, kind in zip(names, kinds):
+            rows.append(ValueCard(board, theme, name, cpuinfo.describe_kind(kind),
+                                  f'{kind["cores"]} · {kind["threads"]} threads'))
+        if details.get('l3'):
+            rows.append(ValueCard(board, theme, 'L3 cache', 'Shared by every core',
+                                  cpuinfo.format_size(details['l3'])))
+
+        self.base_mhz = cpu.get('mhz')
+        base = f'base {self.base_mhz / 1000.0:.1f} GHz' if self.base_mhz else ''
+        self.clock_card = ValueCard(board, theme, 'Clock', join('Reading', base), '…')
+        rows.append(self.clock_card)
+
+        identity = details.get('identity') or {}
+        if identity.get('model'):
+            microcode = identity.get('microcode')
+            rows.append(ValueCard(board, theme, 'Model', identity['model'],
+                                  f'microcode 0x{microcode:X}' if microcode else ''))
+        if details.get('features'):
+            rows.append(ValueCard(board, theme, 'Instructions',
+                                  ' · '.join(details['features']), ''))
+        if cpu.get('name'):
+            rows.append(LinkCard(board, theme, 'Benchmarks',
+                                 'Look this processor up in the browser',
+                                 benchmarks.get_cpu_links(cpu['name'])))
+        return rows
+
+    def set_clock(self, clock):
+        # the rated turbo cannot be read under Hyper-V, so the range is what was seen
+        if not self or not self.clock_card or not clock:
+            return
+        self.clock_card.set_value(
+            f'{clock["now"] / 1000.0:.2f} GHz',
+            join(f'{clock["low"] / 1000.0:.2f}–{clock["high"] / 1000.0:.2f} GHz since the app '
+                 'started', f'base {clock["base"] / 1000.0:.1f} GHz'))
+
     def add_panel(self, key, title, body, subtitle=''):
         return Panel(self.content, self.theme, 'hardware.' + key, title, body, self.folds,
                      self.on_fold, subtitle=subtitle)
@@ -175,9 +262,12 @@ class HardwareBox(ScrollArea):
         board, theme = self.content, self.theme
         panels = []
         cpu = found['cpu']
+        details = found.get('cpu_details') or {}
         clock = f'{cpu["mhz"] / 1000.0:.1f} GHz base' if cpu.get('mhz') else ''
-        body = [ValueCard(board, theme, cpu['name'] or 'Processor',
-                          join(f'{cpu["cores"]} cores', f'{cpu["threads"]} threads', clock))]
+        counts = cpuinfo.describe_kinds(details.get('kinds', []), cpu['threads']) or [
+            f'{cpu["cores"]} cores', f'{cpu["threads"]} threads']
+        body = [ValueCard(board, theme, cpu['name'] or 'Processor', join(*counts, clock))]
+        body += self.get_cpu_rows(details, cpu)
         if found.get('board'):
             body.append(ValueCard(board, theme, found['board'], 'Mainboard'))
         bios, firmware = found.get('bios'), found.get('firmware') or {}
@@ -223,6 +313,11 @@ class HardwareBox(ScrollArea):
                                   join(gpu.get('pcie'), 'driver ' + gpu['driver']
                                        if gpu.get('driver') else ''),
                                   format_bytes(gpu['vram']) if gpu.get('vram') else ''))
+            # a virtual adapter has no memory of its own and no benchmark either
+            if gpu.get('vram') and gpu.get('name'):
+                body.append(LinkCard(board, theme, 'Benchmarks',
+                                     'Look this card up in the browser',
+                                     benchmarks.get_gpu_links(gpu['name'])))
             # two cards of one model take their socket lists in turn
             same = card_ports.get(gpu['name']) or []
             if same:

@@ -14,6 +14,7 @@ import winreg
 
 import psutil
 
+import cpuinfo
 import monitors
 
 
@@ -207,6 +208,7 @@ def read_hardware():
         if detail:
             adapter.update(detail)
             adapter['driver'] = driver or adapter['driver']
-    return {'cpu': read_cpu(), 'memory': modules, 'total': psutil.virtual_memory().total,
+    return {'cpu': read_cpu(), 'cpu_details': cpuinfo.read_details(), 'memory': modules,
+            'total': psutil.virtual_memory().total,
             'gpus': adapters, 'board': board, 'nics': nics, 'bios': bios,
             'firmware': read_firmware(), 'monitors': monitors.read_monitors()}

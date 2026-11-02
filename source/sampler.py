@@ -14,6 +14,7 @@ import winreg
 
 import psutil
 
+import cpuinfo
 import netinfo
 import processes
 
@@ -226,6 +227,7 @@ class Sampler:
         self.network_read = -NETWORK_REFRESH
         self.stats, self.addresses = {}, {}
         self.sensors = Sensors()
+        self.clock = cpuinfo.ClockMeter()
         psutil.cpu_percent(None, percpu=True)
 
     def sample(self, detailed=True):
@@ -236,6 +238,7 @@ class Sampler:
         data = {
             'boot': psutil.boot_time(),
             'cpu': {'total': sum(cores) / max(1, len(cores)), 'cores': cores},
+            'clock': self.clock.sample(),
             'memory': {'total': memory.total, 'used': memory.total - memory.available,
                        'available': memory.available},
             'swap': {'total': swap.total, 'used': swap.used},
