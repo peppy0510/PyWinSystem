@@ -6,7 +6,10 @@
 * What WSL takes of each: its CPU and memory against the `.wslconfig` limits, the memory its VM holds on Windows, and its disk and network traffic.
 * MAC, private IP, gateway and DNS of each adapter; the public IP is asked from cloudflare.com only when you press Look up. A label or description cut short shows in full in a tip. Click an address, a MAC or the host name to copy it.
 * Hardware page: processor, mainboard, each memory module with its channel, part number and speed, and each display adapter with VRAM, PCIe link and driver. The memory panel says how many channels the modules fill (dual, quad and so on, read from the slot names), the speed they run at against their rating, and the peak bandwidth that makes (MT/s × 8 bytes × channels).
-* Displays on the Hardware page: what each monitor reports in its EDID (vendor, product code, serial, date of manufacture, size), its resolution and refresh rate, and the graphics card and port it is plugged into. Under each graphics card its sockets in driver order, filled where a display is plugged in, with a tip naming the display.
+* Displays on the Hardware page: what each monitor reports in its EDID (vendor, product code, serial, date of manufacture, size), its resolution and refresh rate, and the graphics card and port it is plugged into. Under each graphics card its sockets in driver order, filled where a display is plugged in, with a tip naming the display. Displays chained over DisplayPort MST get a socket each after the real ones, as the driver does not tell which socket the chain hangs from.
+* WSL page: the distribution and whether it runs, the networking mode, the ports published, opened, forwarded and listening inside WSL, and what is not applied yet. It reads without starting a stopped WSL. Restart WSL needs no administrator rights in mirrored mode.
+* WSL service: publishes chosen ports of WSL to the LAN (Hyper-V and Windows firewalls in mirrored mode, port forwarding in NAT mode), starts WSL and your startup commands on boot without a logon, keeps the distribution running, and recovers it after sleep by a restart or by repairing only what broke. Apply registers the tasks; they run without the app. The same works from the command line, see below.
+* Edits `%USERPROFILE%\.wslconfig` and `/etc/wsl.conf` of the distribution in place, keeping comments; the first change keeps the old file as `.bak`, and a value equal to the WSL default is removed rather than written. A default user that does not exist or a malformed host name is refused before it is written.
 * Disk list with media, bus, size and the health Windows reports, Storage Spaces drives included.
 * Disk health: NVMe temperature, life used, spare, power-on time, data written and read, unsafe shutdowns and media errors without administrator rights; SATA SMART attributes after Run as administrator. A hard disk that is asleep is left asleep unless you press Read anyway.
 * GPU power against its limit, fan, core and memory clocks, and system uptime.
@@ -29,6 +32,28 @@
 * To run from the source, install Python packages in the requirements.pip file, then execute source/main.pyw with pythonw.exe.
 * GPU figures need an NVIDIA driver (NVML).
 * Execute source/makeshortcut.py to put a shortcut in the Start menu.
+
+## WSL from the command line
+
+`PyWinSystem.exe --wsl ACTION`, or `pythonw.exe source/main.pyw --wsl ACTION` from the source, runs without a window. Actions that change Windows ask for elevation themselves.
+
+* `status`, `check`: what is in effect and what is wrong; add `--json` for other programs.
+* `apply`, `uninstall`: publish the ports and register the tasks, or take them away again; add `--preview` to see the changes first.
+* `restart`, `boot`, `resume`: what the Restart button and the tasks run.
+
+The settings live in `%APPDATA%\PyWinSystem\wsl.json`, holding only what differs from the defaults, and every run is logged to `wsl.log` beside it.
+
+## Coming from wsl-service
+
+PyWinSystem replaces [wsl-service](https://github.com/peppy0510/wsl-service). Its tasks, firewall rules and the WSL Restart shortcut have other names here, so the two would both publish the ports. Move over once:
+
+1. `PyWinSystem.exe --wsl migrate --preview` shows what will be carried over and removed. Give the wsl-service folder after `migrate` when its task is no longer registered.
+2. `PyWinSystem.exe --wsl migrate` writes `wsl.json`, applies it, then removes the wsl-service tasks, the `+WSLTCP` and `+WSLUDP` rules, its forwarding and its shortcut. Ours open before theirs close.
+3. Check the WSL page, then delete the wsl-service folder yourself.
+
+* `NETWORK_MODE` is gone; the mode follows `networkingMode` in `.wslconfig`.
+* The UDP relay is not carried over. In mirrored mode nothing needs it; in NAT mode its ports stay opened but are not relayed.
+* Nothing is published by default here, unlike the wsl-service template.
 
 ## Supported platforms
 
