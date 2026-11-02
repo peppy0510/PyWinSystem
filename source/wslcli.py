@@ -12,11 +12,13 @@ import json
 import os
 import subprocess
 import sys
+import traceback
 
 import wslmanager
 
 from ctypes import wintypes
 from wslshell import is_admin
+from wslshell import log
 
 
 ACTIONS = ('status', 'check', 'apply', 'uninstall', 'boot', 'resume', 'restart', 'migrate')
@@ -95,6 +97,22 @@ def report(lines, succeeded):
 def is_console_hidden():
     window = ctypes.windll.kernel32.GetConsoleWindow()
     return bool(window) and not ctypes.windll.user32.IsWindowVisible(window)
+
+
+def run_logged(argv):
+    '''main, with what a task without a window or console would otherwise lose in wsl.log.'''
+    arguments = argv[argv.index('--wsl') + 1:]
+    quiet = bool(arguments) and arguments[0] in ('status', 'check')
+    if not quiet:
+        log(f'--wsl {" ".join(arguments)} · {"elevated" if is_admin() else "not elevated"} · '
+            f'{sys.executable}')
+    try:
+        return main(argv)
+    except BaseException as error:
+        if isinstance(error, SystemExit):
+            raise
+        log(f'--wsl {" ".join(arguments)} failed\n{traceback.format_exc()}')
+        return 1
 
 
 def main(argv):

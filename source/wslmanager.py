@@ -8,6 +8,7 @@ email: peppy0510@hotmail.com
 
 
 import ipaddress
+import os
 import re
 import socket
 import subprocess
@@ -37,6 +38,7 @@ VETHERNETS = ('vEthernet (WSL)', 'vEthernet (WSLCore)', 'vEthernet (WSL (Hyper-V
 LOCAL_ADDRESS = re.compile(r'^(127\.|\[::1\]|::1$|10\.255\.255\.254$)')
 INET = re.compile(r'inet (\d+(?:\.\d+){3})')
 HOST_NAME = re.compile(r'^(?!-)[A-Za-z0-9-]{1,63}(?<!-)$')
+PROGRAM = re.compile(r'users:\(\("([^"]+)"')
 
 ROUTED_ADDRESS = ('(Get-NetIPConfiguration | Where-Object IPv4DefaultGateway)'
                   '.IPv4Address.IPAddress')
@@ -306,7 +308,17 @@ def start_keepalive(settings, distribution):
     return 'session'
 
 
+def has_settings(action):
+    # the tasks act on what Apply saved; without the file they would take the ports away
+    if os.path.exists(wslsettings.PATH):
+        return True
+    log(f'{action}: {wslsettings.PATH} is missing, nothing done')
+    return False
+
+
 def boot():
+    if not has_settings('boot'):
+        return
     settings = wslsettings.load()[0]
     distribution = resolve_distribution(settings)
     log(f'boot {distribution}')
@@ -376,6 +388,8 @@ def heal(settings, distribution):
 
 
 def resume():
+    if not has_settings('resume'):
+        return
     settings = wslsettings.load()[0]
     distribution = resolve_distribution(settings)
     action = settings['resume_action']
@@ -387,7 +401,8 @@ def resume():
     restart()
 
 
-def parse_listening(text):
+def parse_listening(text, names):
+    '''Ports other machines could reach, filling names with the program behind each.'''
     ports = set()
     for line in text.split('\n'):
         parts = line.split()
@@ -396,15 +411,22 @@ def parse_listening(text):
         address, _, port = parts[3].rpartition(':')
         if port.isdigit() and not LOCAL_ADDRESS.match(address):
             ports.add(int(port))
+            found = PROGRAM.search(line)
+            if found:
+                # Linux cuts a program name at 15 characters, as in 'next-server (v1'
+                names.setdefault(int(port), found.group(1).split(' (')[0])
     return sorted(ports)
 
 
 def get_listening(distribution):
-    code, output = wsl(distribution, ['sh', '-c', 'ss -Hltn; echo --; ss -Hlun'], 15)
+    # as root, ss -p names the programs of every user
+    code, output = wsl(distribution, ['sh', '-c', 'ss -Hltnp; echo --; ss -Hlunp'], 15)
     if code != 0:
         return None
     tcp, _, udp = output.partition('--')
-    return {'tcp': parse_listening(tcp), 'udp': parse_listening(udp)}
+    names = {}
+    return {'tcp': parse_listening(tcp, names), 'udp': parse_listening(udp, names),
+            'names': {str(port): name for port, name in names.items()}}
 
 
 def read_wsl_conf(distribution):
@@ -449,6 +471,31 @@ def write_wsl_conf(distribution, changes):
         return f'{distribution} refused the write'
     log(f'/etc/wsl.conf in {distribution} {changes}')
     return None
+
+
+def get_quick_status(settings=None):
+    '''What the registry and the files tell at once, for the page to show before get_status
+    answers; None stands for not read yet.'''
+    settings = settings or wslsettings.load()[0]
+    config = wslconfig.read()
+    return {
+        'partial': True,
+        'distribution': resolve_distribution(settings),
+        'distributions': [{'name': n, 'version': v, 'default': d}
+                          for n, v, d in get_distributions()],
+        'running': None,
+        'mode': get_mode(config),
+        'wslconfig': config,
+        'tasks': {name: None for name in wsltasks.NAMES},
+        'keepalive': settings['keepalive'],
+        'held_by': None,
+        'opened': None,
+        'published': get_published(settings),
+        'last_log': read_last_log(),
+        'listening': None,
+        'wsl_conf': None,
+        'problems': None,
+    }
 
 
 def get_status(settings=None, problems=None):
