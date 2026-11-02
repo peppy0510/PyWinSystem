@@ -39,6 +39,10 @@ def wait_for_previous():
 
 
 def main():
+    # the WSL tasks run without a window beside a running app, so before the instance guard
+    if '--wsl' in sys.argv:
+        from wslcli import main as run_wsl
+        sys.exit(run_wsl(sys.argv))
     wait_for_previous()
     if not has_running_instance():
         launch()
