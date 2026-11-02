@@ -32,18 +32,23 @@ from controls import SliderCard
 from controls import get_button_width
 from meters import BUSY_DELAY
 from meters import ValueCard
+from monitorbox import GroupRow
 from utilities import call_painted
+from wslcards import BusyCard
 from wslcards import HOST_KEYS
+from wslcards import HelpHeader
 from wslcards import PORT_KEYS
 from wslcards import PortGrid
 from wslcards import TextCard
 from wslshell import is_admin
 from wslshell import log
+from wslshell import read_last_log
 
 
 # a status read takes seconds, so the page asks again only now and then
 REFRESH_MS = 30000
 CONFIRM_MS = 3000
+BUSY_SPIN_MS = 80
 PROBLEM_MS = 6000
 # the page opens with what the registry and the files tell at once; the rest shows these
 PENDING = 'Reading…'
@@ -57,6 +62,19 @@ RESTART_CONFIG_NOTE = 'Restart to use the changed settings below'
 REMOVE_NOTE = 'Closes the ports and stops the start at boot; your choices here are kept'
 # kept folded until it is opened once, so a newcomer meets the everyday settings first
 ADVANCED_SEEN = 'wsl.advanced.seen'
+
+HELP_STATE = ('The Linux distribution this page looks after, whether it runs, and how WSL '
+              'shares the network of this PC. Restart WSL stops it and starts it again.')
+HELP_OPEN = ('Servers you run in WSL wait on ports. Light a port and press Apply, and other '
+             'computers and phones on your network reach that server at the address of this PC.')
+HELP_START = ('Starts WSL when Windows starts, even before anyone signs in, keeps it running, '
+              'and brings it back after sleep. Press Apply after turning it on.')
+HELP_ADVANCED = ('What happens after sleep, the state of the service, its log, and settings '
+                 'most people never need. The files of WSL itself show below while this is open.')
+HELP_CONFIG = ('.wslconfig in your user folder: memory, processors and networking of the WSL '
+               'machine, shared by every distribution. Used after Restart WSL.')
+HELP_CONF = ('/etc/wsl.conf inside the distribution: systemd, Windows programs and drives, '
+             'host name and the default user. Used after Restart WSL.')
 
 ACTIONS = {
     'restart': ('Restart', 'Restarting', wslmanager.restart),
@@ -153,7 +171,7 @@ class WslBox(ScrollArea):
         self.read_card.set_captions('Reading')
         self.cards = {}
         for action, (caption, working, function) in ACTIONS.items():
-            card = ActionCard(board, theme, '', '', caption, lambda a=action: self.run(a))
+            card = BusyCard(board, theme, '', '', caption, lambda a=action: self.run(a))
             card.set_captions(working, 'Confirm')
             self.cards[action] = card
         self.cards['restart'].label = 'Restart WSL'
@@ -164,12 +182,14 @@ class WslBox(ScrollArea):
         self.cards['uninstall'].description = REMOVE_NOTE
         self.cards['uninstall'].set_tone('warn')
         self.log_card = ActionCard(board, theme, 'Log', '', 'Open', self.open_log)
+        self.port_grid = PortGrid(board, theme, self.toggle_port)
         if ADVANCED_SEEN not in self.folds:
             self.folds.update({'wsl.advanced', ADVANCED_SEEN})
+        self.advanced_folded = self.is_advanced_folded()
         self.settings_cards = self.make_settings_cards()
         self.config_cards = self.make_config_cards()
         self.wsl_conf_cards = self.make_wsl_conf_cards()
-        self.kept = ([self.read_card, self.log_card] + list(self.cards.values()) +
+        self.kept = ([self.read_card, self.log_card, self.port_grid] + list(self.cards.values()) +
                      list(self.settings_cards.values()) + list(self.config_cards.values()) +
                      list(self.wsl_conf_cards.values()))
 
@@ -177,6 +197,8 @@ class WslBox(ScrollArea):
         self.Bind(wx.EVT_TIMER, self.on_timer, self.timer)
         self.config_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.write_config, self.config_timer)
+        self.busy_timer = wx.Timer(self)
+        self.Bind(wx.EVT_TIMER, self.on_busy_tick, self.busy_timer)
         self.build()
 
     def make_settings_cards(self):
@@ -189,9 +211,9 @@ class WslBox(ScrollArea):
             'add_port': text('add_port', 'Add a port',
                              'Open one that nothing in WSL listens on yet', PORT_KEYS,
                              'port number'),
-            'keepalive': SettingCard(board, theme, 'Run before sign-in',
-                                     'Starts WSL at boot and keeps it running, also before '
-                                     'anyone signs in',
+            'keepalive': SettingCard(board, theme, 'Start with Windows',
+                                     'Runs WSL from boot, also before sign-in, and brings it '
+                                     'back after sleep',
                                      lambda: self.store('keepalive', None)),
             'resume_action': ChoiceCard(board, theme, 'After sleep',
                                         'Repair fixes only what broke; Restart drops '
@@ -420,6 +442,12 @@ class WslBox(ScrollArea):
         self.end_confirm()
         self.busy = action
         card.set_caption(working)
+        card.set_busy(True)
+        self.busy_note = card.description
+        self.busy_started = time.monotonic()
+        # log lines from before the press are not this action's steps
+        self.busy_stamp = time.strftime('%Y-%m-%d %H:%M:%S')
+        self.busy_timer.Start(BUSY_SPIN_MS)
         settings = wslsettings.load()[0]
         elevate = wslmanager.needs_admin(action, settings) and not is_admin()
 
@@ -441,10 +469,25 @@ class WslBox(ScrollArea):
             self.confirming = False
             self.cards['uninstall'].set_caption(ACTIONS['uninstall'][0])
 
+    def on_busy_tick(self, event):
+        # the step comes from the log, so an elevated run in its own process shows too
+        card = self.cards.get(self.busy)
+        if card is None:
+            self.busy_timer.Stop()
+            return
+        card.spin()
+        elapsed = int(time.monotonic() - self.busy_started)
+        line = read_last_log()
+        step = line[20:] if line[:19] >= self.busy_stamp else ''
+        card.set_description(f'{elapsed} s · {step}' if step else f'{elapsed} s')
+
     def finish(self, action, done):
         if not self:
             return
         self.busy = None
+        self.busy_timer.Stop()
+        self.cards[action].set_busy(False)
+        self.cards[action].set_description(self.busy_note)
         self.cards[action].set_caption(ACTIONS[action][0])
         if action == 'restart' and done:
             self.config_changed = False
@@ -555,7 +598,9 @@ class WslBox(ScrollArea):
             mode, note = 'NAT', 'WSL sits behind this PC; ports are forwarded to it'
         rows.append(ValueCard(board, theme, 'Networking', note, mode))
         restart = self.cards['restart']
-        restart.set_description(RESTART_CONFIG_NOTE if self.config_changed else RESTART_NOTE)
+        # while it runs the card shows the time and the step instead
+        if self.busy != 'restart':
+            restart.set_description(RESTART_CONFIG_NOTE if self.config_changed else RESTART_NOTE)
         restart.set_tone('warn' if self.config_changed else 'plain')
         rows.append(restart)
         return rows
@@ -567,7 +612,8 @@ class WslBox(ScrollArea):
     def get_port_rows(self, status, settings):
         board, theme = self.content, self.theme
         partial = status.get('partial')
-        listening = status.get('listening') or {}
+        listening = status.get('listening') or (status.get('last_listening') if partial
+                                                else None) or {}
         heard = set(listening.get('tcp', [])) | set(listening.get('udp', []))
         names = listening.get('names', {})
         opened = set((status.get('opened') or {}).get('windows', []))
@@ -577,14 +623,17 @@ class WslBox(ScrollArea):
             name = names.get(str(port))
             on = port in chosen
             warn = False
+            # a port nothing listens on leaves the grid once it is off, so off means removed
+            gone = port not in heard
+            click = 'click to remove it' if gone else 'click to close it'
             if partial:
                 note = PENDING
             elif on and port in opened:
-                silent = port not in heard and status.get('listening') is not None
+                silent = gone and status.get('listening') is not None
                 note = ('Open, but nothing in WSL answers on it now' if silent else
-                        'Open · other devices can reach it')
+                        'Open · other devices can reach it') + f' · {click}'
             elif on:
-                note = 'Turned on · Apply opens it'
+                note = f'Turned on · Apply opens it · {click}'
             elif port in opened:
                 note, warn = 'Turned off · open until Apply', True
             else:
@@ -592,17 +641,23 @@ class WslBox(ScrollArea):
             ports.append({'port': port, 'label': f'{port} {name}' if name else str(port),
                           'on': on, 'warn': warn, 'note': note})
         rows = []
+        if not chosen and not settings['firewall_ports'] and not settings['keepalive'] \
+                and not partial:
+            rows.append(ValueCard(board, theme, 'Get started',
+                                  'Light the ports other devices should reach, then press Apply',
+                                  ''))
         if ports:
             silent = [p['port'] for p in ports
                       if p['on'] and p['port'] not in heard and status.get('listening') is not None]
             summary = f'{len(chosen)} of {len(ports)} open'
             note = 'Lit ones are open to other devices; click one to turn it on or off'
             if silent and not partial:
-                note = f'Nothing answers on {", ".join(map(str, silent))} now'
+                note = (f'Nothing answers on {", ".join(map(str, silent))} now; click one to '
+                        'remove it')
             rows.append(ValueCard(board, theme, 'Ports', note, summary))
-            grid = PortGrid(board, theme, self.toggle_port)
-            grid.set_ports(ports)
-            rows.append(grid)
+            # one grid for the page's life, so a refresh does not grow it again from nothing
+            self.port_grid.set_ports(ports)
+            rows.append(self.port_grid)
         elif partial:
             rows.append(ValueCard(board, theme, PENDING, '', ''))
         elif status.get('running'):
@@ -614,10 +669,15 @@ class WslBox(ScrollArea):
         rows.append(self.settings_cards['add_port'])
         return rows
 
-    def get_run_rows(self, status, settings):
+    def get_advanced_rows(self, status, settings):
         board, theme = self.content, self.theme
         cards = self.settings_cards
-        rows = [cards['keepalive']]
+        rows = [GroupRow(board, theme, 'After sleep'), cards['resume_action']]
+        # the checks only matter to Repair
+        if settings['resume_action'] == 'heal':
+            rows += [cards['resume_probe_ports'], cards['resume_probe_host']]
+
+        rows.append(GroupRow(board, theme, 'Service'))
         boot = (status.get('tasks') or {}).get(wsltasks.BOOT)
         if boot is None:
             started = PENDING_VALUE
@@ -630,23 +690,16 @@ class WslBox(ScrollArea):
             held = {'task': 'Yes', 'process': 'Yes, by another program'}.get(
                 status['held_by'], 'No')
             rows.append(ValueCard(board, theme, 'Kept running now',
-                                  'Run before sign-in holds the distribution', held,
+                                  'Start with Windows holds the distribution', held,
                                   bool(status['running']) and status['held_by'] is None))
-        rows.append(cards['resume_action'])
-        # the checks only matter to Repair
-        if settings['resume_action'] == 'heal':
-            rows += [cards['resume_probe_ports'], cards['resume_probe_host']]
-        return rows
+        self.log_card.set_description(status.get('last_log') or 'Nothing logged yet')
+        rows += [self.cards['uninstall'], self.log_card, self.read_card]
 
-    def get_advanced_rows(self, status):
-        cards = self.settings_cards
-        rows = []
+        rows.append(GroupRow(board, theme, 'More'))
         # with one distribution there is nothing to choose
         if len(cards['distribution'].options) > 1:
             rows.append(cards['distribution'])
-        self.log_card.set_description(status.get('last_log') or 'Nothing logged yet')
-        rows += [cards['firewall_ports'], cards['more'], self.cards['uninstall'], self.log_card,
-                 self.read_card]
+        rows += [cards['firewall_ports'], cards['more']]
         return rows
 
     def get_problem_rows(self, status):
@@ -673,48 +726,61 @@ class WslBox(ScrollArea):
             panels.append(Panel(board, theme, 'wsl.state', 'WSL', rows + [self.read_card],
                                 self.folds, self.on_fold))
         else:
-            mode = status.get('mode', '')
             settings = self.update_settings_cards(status)
             self.update_config_cards()
-            panels.append(Panel(board, theme, 'wsl.state', 'WSL', self.get_state_rows(status),
-                                self.folds, self.on_fold,
-                                subtitle='Mirrored' if mode == 'mirrored' else mode.upper()))
+            panels.append(self.make_panel('wsl.state', 'WSL', self.get_state_rows(status),
+                                          HELP_STATE))
             unapplied = self.get_unapplied(status)
             if unapplied:
-                self.cards['apply'].set_description(' · '.join(unapplied))
+                if self.busy != 'apply':
+                    self.cards['apply'].set_description(' · '.join(unapplied))
                 panels.append(Panel(board, theme, 'wsl.apply', 'Not applied yet',
                                     (self.cards['apply'],), self.folds, self.on_fold))
             problems = self.get_problem_rows(status)
             if problems:
                 panels.append(Panel(board, theme, 'wsl.problems', 'Problems', problems,
                                     self.folds, self.on_fold, subtitle=str(len(problems))))
-            panels.append(Panel(board, theme, 'wsl.open', 'Open to the network',
-                                self.get_port_rows(status, settings), self.folds, self.on_fold,
-                                subtitle='other devices reach WSL on these'))
-            panels.append(Panel(board, theme, 'wsl.run', 'Start and recover',
-                                self.get_run_rows(status, settings), self.folds, self.on_fold))
-            panels.append(Panel(board, theme, 'wsl.config', 'WSL settings',
-                                list(self.config_cards.values()), self.folds, self.on_fold,
-                                subtitle='.wslconfig · used after Restart WSL'))
-            if status.get('wsl_conf') is not None:
-                self.update_wsl_conf_cards(status)
-                rows = list(self.wsl_conf_cards.values())
-            elif status.get('partial'):
-                rows = [ValueCard(board, theme, PENDING, '', '')]
-            else:
-                rows = [ValueCard(board, theme, 'Shown while the distribution runs',
-                                  'It is not started just to read this', '')]
-            panels.append(Panel(board, theme, 'wsl.conf', 'Distribution settings', rows,
-                                self.folds, self.on_fold,
-                                subtitle=f'/etc/wsl.conf in {status.get("distribution", "")}'))
-            panels.append(Panel(board, theme, 'wsl.advanced', 'Advanced',
-                                self.get_advanced_rows(status), self.folds, self.on_fold))
+            panels.append(self.make_panel('wsl.open', 'Open to the network',
+                                          self.get_port_rows(status, settings), HELP_OPEN))
+            panels.append(self.make_panel('wsl.start', 'Start with Windows',
+                                          [self.settings_cards['keepalive']], HELP_START))
+            panels.append(self.make_panel('wsl.advanced', 'Advanced settings',
+                                          self.get_advanced_rows(status, settings),
+                                          HELP_ADVANCED))
+            # the files of WSL itself show only while Advanced settings is open
+            if not self.is_advanced_folded():
+                panels.append(self.make_panel('wsl.config', 'WSL settings',
+                                              list(self.config_cards.values()), HELP_CONFIG,
+                                              '.wslconfig · used after Restart WSL'))
+                if status.get('wsl_conf') is not None:
+                    self.update_wsl_conf_cards(status)
+                    rows = list(self.wsl_conf_cards.values())
+                elif status.get('partial'):
+                    rows = [ValueCard(board, theme, PENDING, '', '')]
+                else:
+                    rows = [ValueCard(board, theme, 'Shown while the distribution runs',
+                                      'It is not started just to read this', '')]
+                panels.append(self.make_panel('wsl.conf', 'Distribution settings', rows,
+                                              HELP_CONF, '/etc/wsl.conf in '
+                                              f'{status.get("distribution", "")}'))
         self.set_panels(panels)
         self.bind_children()
         self.apply_theme(theme)
         self.relayout_panels()
 
+    def make_panel(self, key, title, rows, help_text, subtitle=''):
+        header = HelpHeader(self.content, self.theme, title, subtitle, help_text)
+        return Panel(self.content, self.theme, key, title, rows, self.folds, self.on_fold,
+                     header=header)
+
+    def is_advanced_folded(self):
+        return 'wsl.advanced' in self.folds
+
     def on_fold(self):
+        # opening or closing Advanced settings adds or takes away the panels below it
+        if self.is_advanced_folded() != self.advanced_folded:
+            self.advanced_folded = self.is_advanced_folded()
+            wx.CallAfter(self.build)
         self.relayout_panels()
         if self.on_folds:
             self.on_folds()
@@ -729,6 +795,7 @@ class WslBox(ScrollArea):
     def close(self):
         self.timer.Stop()
         self.config_timer.Stop()
+        self.busy_timer.Stop()
         # a slider let go just before closing still gets written
         self.write_config(read=False)
 

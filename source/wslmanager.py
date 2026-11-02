@@ -273,6 +273,7 @@ def uninstall(preview=False):
 
 
 def start_distribution(distribution):
+    log(f'starting {distribution}')
     return run(['wsl.exe', '-d', distribution, '--exec', 'true'], 60)[0] == 0
 
 
@@ -280,12 +281,14 @@ def run_startup_commands(settings, distribution):
     commands = settings['startup_commands']
     if not commands:
         return
+    log('running the startup commands')
     code, output = run(['wsl.exe', '-d', distribution, '--exec', 'bash', '-c',
                         ' && '.join(commands)], 300)
     log(f'startup commands exited with {code}')
 
 
 def stop_all():
+    log('stopping every distribution')
     run(['wsl.exe', '--shutdown'], 60)
     deadline = time.time() + STOP_TIMEOUT
     while get_running() and time.time() < deadline:
@@ -298,13 +301,12 @@ def start_keepalive(settings, distribution):
     if is_admin() and wsltasks.get_states()[wsltasks.KEEPALIVE] != 'Missing':
         if wsltasks.start(wsltasks.KEEPALIVE):
             return 'task'
-    # this logon session holds the distribution until the task takes over on the next boot
+    # this logon session holds the distribution until the task takes over on the next boot;
+    # wsl.exe itself without a window, as conhost given DETACHED_PROCESS ended at once
     subprocess.Popen(
-        ['conhost.exe', '--headless', 'wsl.exe', '-d', distribution, '-u', 'root', '--',
-         'sleep', 'infinity'],
+        ['wsl.exe', '-d', distribution, '-u', 'root', '--', 'sleep', 'infinity'],
         stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        creationflags=CREATE_NO_WINDOW | subprocess.DETACHED_PROCESS |
-        subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
+        creationflags=CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP, close_fds=True)
     return 'session'
 
 
@@ -493,6 +495,8 @@ def get_quick_status(settings=None):
         'published': get_published(settings),
         'last_log': read_last_log(),
         'listening': None,
+        # the last read, so the page draws the same ports before this one answers
+        'last_listening': wslsettings.load_state().get('listening'),
         'wsl_conf': None,
         'problems': None,
     }
@@ -541,6 +545,11 @@ def get_status(settings=None, problems=None):
 
     listening = get_listening(distribution) if status['running'] else None
     status['listening'] = listening
+    if listening is not None:
+        state = wslsettings.load_state()
+        if state.get('listening') != listening:
+            state['listening'] = listening
+            wslsettings.save_state(state)
     status['wsl_conf'] = read_wsl_conf(distribution) if status['running'] else None
     if listening is not None:
         heard = set(listening['tcp']) | set(listening['udp'])

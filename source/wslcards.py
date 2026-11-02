@@ -7,18 +7,25 @@ email: peppy0510@hotmail.com
 '''
 
 
+import math
 import string
 
 import wx
 
+from controls import ActionCard
 from controls import CardBase
 from controls import ChipGrid
 from controls import NumberEntry
+from controls import PanelHeader
 from controls import draw_button
 from controls import draw_row_face
 from hovertip import hide_hover_tip
 from hovertip import show_hover_tip
 from utilities import BUTTON_HEIGHT
+from utilities import HEADER_BAND
+from utilities import PANEL_MARGIN
+from utilities import PANEL_PAD
+from utilities import draw_text_in
 from utilities import fill_rect
 from utilities import get_font
 from utilities import get_ink
@@ -28,6 +35,41 @@ from utilities import get_text_top
 PORT_KEYS = string.digits + ', '
 HOST_KEYS = string.ascii_letters + string.digits + '.-_'
 TEXT_LIMIT = 400
+
+
+class BusyCard(ActionCard):
+    '''An action card that turns a ring beside its button while the action runs, so a
+    restart that takes half a minute does not look stuck.'''
+
+    RING = 14
+    GAP = 12
+    busy = False
+    angle = 0
+
+    def set_busy(self, busy):
+        if busy != self.busy:
+            self.busy = busy
+            self.Refresh()
+
+    def spin(self):
+        self.angle = (self.angle + 30) % 360
+        self.Refresh()
+
+    def draw_control(self, gc, width, height):
+        left = super().draw_control(gc, width, height)
+        if not self.busy:
+            return left
+        radius = self.RING / 2 - 1
+        cx, cy = left - self.GAP - self.RING / 2, height / 2
+        gc.SetPen(wx.Pen(wx.Colour(self.theme['edge']), 2))
+        gc.SetBrush(wx.TRANSPARENT_BRUSH)
+        gc.DrawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
+        path = gc.CreatePath()
+        start = math.radians(self.angle)
+        path.AddArc(cx, cy, radius, start, start + math.radians(100), True)
+        gc.SetPen(wx.Pen(wx.Colour(self.theme['accent']), 2))
+        gc.StrokePath(path)
+        return left - self.GAP - self.RING
 
 
 class TextCard(NumberEntry, CardBase):
@@ -147,6 +189,16 @@ class PortGrid(ChipGrid):
         self.ports = list(ports)
         self.set_options([port['label'] for port in self.ports])
 
+    def relayout(self):
+        # not yet sized, the grid takes the width of the page, so it opens at its full
+        # height instead of growing a moment later
+        if self.GetClientSize()[0] <= 0:
+            width = self.GetParent().GetClientSize()[0] - PANEL_MARGIN * 2
+            if width > 0:
+                self.SetMinSize(wx.Size(-1, self.get_height(width)))
+            return
+        super().relayout()
+
     def choose(self):
         index = self.hit_test(self.up_position)
         if index < 0 or index != self.down_index:
@@ -182,3 +234,43 @@ class PortGrid(ChipGrid):
                 state = 'plain'
             draw_button(gc, self.theme, self.get_chip_rect(index, width), port['label'], state,
                         'warn' if port['warn'] else None)
+
+
+class HelpHeader(PanelHeader):
+    '''A panel header with a ? at its right end that tells in a tip what the panel is for.'''
+
+    MARK = 14
+
+    # Panel hands its toggle over as on_toggle, while a press calls on_click
+    on_toggle = None
+
+    def __init__(self, parent, theme, title, subtitle, help_text):
+        super().__init__(parent, theme, title, subtitle, self.toggle)
+        self.help_text = help_text
+
+    def toggle(self):
+        if self.on_toggle:
+            self.on_toggle()
+
+    def get_mark_rect(self):
+        width = self.GetClientSize()[0]
+        return wx.Rect(width - PANEL_PAD - self.MARK, (HEADER_BAND - self.MARK) // 2,
+                       self.MARK, self.MARK)
+
+    def update_tip(self, point=None):
+        point = point or wx.GetMousePosition()
+        mark = self.get_mark_rect().Inflate(4, 4)
+        if mark.Contains(self.ScreenToClient(point)):
+            show_hover_tip(self, self.theme, [(self.title.title(), 'dim'),
+                                              (self.help_text, 'text')], point)
+            return
+        super().update_tip(point)
+
+    def draw(self, gc, width, height):
+        super().draw(gc, width, height)
+        rect = self.get_mark_rect()
+        gc.SetPen(wx.Pen(wx.Colour(self.theme['dim']), 1))
+        gc.SetBrush(wx.TRANSPARENT_BRUSH)
+        gc.DrawEllipse(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1)
+        draw_text_in(gc, '?', rect, get_font(8, True), self.theme['dim'],
+                     back=self.theme['band'])

@@ -10,7 +10,7 @@
 * Benchmarks buttons open the processor on PassMark, Technical City and UserBenchmark, and each graphics card on Technical City and UserBenchmark, in your browser; the app itself sends nothing. UserBenchmark may first ask you to pick the human once.
 * Monitors page, one panel per display, left to right: brightness, contrast, colour gains, volume and the input source over DDC/CI where the monitor answers it, only what its capabilities list; brightness, contrast, colour temperature and red, green and blue of the graphics card gamma for any monitor; full-screen test patterns; and what the EDID says (vendor, product code, serial, date of manufacture, size), the graphics card, the port and its sockets. The monitors are read the first time the page opens, as DDC/CI answers slowly. Changed gamma comes back after sign-in, unlock and resume through a task of your own account, PyWinSystem Monitors in Task Scheduler, with or without the app running; the task goes when every display is back to untouched. Kept after a restart at the top of the gamma settings tells whether that task is in place. Reset every monitor is in Settings.
 * Under each graphics card on the Hardware page its sockets in driver order, filled where a display is plugged in, with a tip naming the display. A monitor that can daisy-chain has a DisplayPort MST hub inside and still lands on its own socket; only a chained display whose socket the driver does not tell gets a socket of its own after the real ones.
-* WSL page: the distribution and whether it runs, the networking mode, the ports published, opened, forwarded and listening inside WSL, and what is not applied yet. It reads without starting a stopped WSL. Restart WSL needs no administrator rights in mirrored mode.
+* WSL page: the distribution and whether it runs, the networking mode, the ports published, opened, forwarded and listening inside WSL, and what is not applied yet. Click a port to open or close it, or to remove one that nothing answers on any more. A button at work shows the seconds and the step it is on. It reads without starting a stopped WSL. Restart WSL needs no administrator rights in mirrored mode.
 * WSL service: publishes chosen ports of WSL to the LAN (Hyper-V and Windows firewalls in mirrored mode, port forwarding in NAT mode), starts WSL and your startup commands on boot without a logon, keeps the distribution running, and recovers it after sleep by a restart or by repairing only what broke. Apply registers the tasks; they run without the app. The same works from the command line, see below.
 * Edits `%USERPROFILE%\.wslconfig` and `/etc/wsl.conf` of the distribution in place, keeping comments; the first change keeps the old file as `.bak`, and a value equal to the WSL default is removed rather than written. A default user that does not exist or a malformed host name is refused before it is written.
 * Disk list with media, bus, size and the health Windows reports, Storage Spaces drives included.
@@ -35,6 +35,14 @@
 * To run from the source, install Python packages in the requirements.pip file, then execute source/main.pyw with pythonw.exe.
 * GPU figures need an NVIDIA driver (NVML).
 * Execute source/makeshortcut.py to put a shortcut in the Start menu.
+
+## Reaching WSL from other devices
+
+1. Open the WSL page. Every server listening in WSL shows as a port, such as `22 sshd` or `80 nginx`.
+2. Light the ports other computers and phones should reach, then press Apply changes and allow the administrator prompt.
+3. Turn on Start with Windows, and press Apply changes again, so WSL runs from boot, also before anyone signs in, and comes back after sleep.
+
+Every panel has a ? that tells what it is for. Advanced settings, folded at first, holds the rest: what happens after sleep, the service and its log, `.wslconfig` and `/etc/wsl.conf`.
 
 ## WSL from the command line
 
