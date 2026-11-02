@@ -99,8 +99,9 @@ def get_port_key(port):
 # 'ports': [...]}} for the active displays; ports lists every socket of that graphics
 # card with whether a display uses it. No administrator rights, about 1 ms for two cards.
 # connector counts the ports of one kind on one card as the driver numbers them, not
-# their order on the bracket. A display chained over DisplayPort MST has no socket of its
-# own: it gets 'connector': None and 'chained': True
+# their order on the bracket. A display behind a DisplayPort MST hub, in a dock or in a
+# monitor that can daisy-chain, gets the socket of the hub with 'hub': True, or
+# 'connector': None and 'chained': True when that socket cannot be told
 def read_connections():
     targets = {}
     for path in query_paths(QDC_ALL_PATHS):
@@ -116,19 +117,30 @@ def read_connections():
         if path.flags & PATH_ACTIVE:
             target['used'] = True
 
-    # the sockets of a card share one block of target ids; MST adds a target outside it for
-    # every chained display (RTX 4070 Ti: sockets 0x1100-0x1106, two chains 0x1204, 0x1224)
+    # the sockets of a card share one block of target ids; MST adds targets outside it, and
+    # NVIDIA puts the DisplayPort socket of the hub in the next digit (RTX 4070 Ti: sockets
+    # 0x1100-0x1106, two monitors with hubs on DP 1 and DP 3 as 0x1205 and 0x1225)
     blocks = {}
     for low, high, number in targets:
         blocks[(low, high)] = min(blocks.get((low, high), number >> 8), number >> 8)
+    sockets = {(low, high, target['connector']): target
+               for (low, high, number), target in targets.items()
+               if number >> 8 == blocks[(low, high)] and target['output'] == 'DisplayPort'}
     for (low, high, number), target in targets.items():
-        if number >> 8 != blocks[(low, high)]:
+        if number >> 8 == blocks[(low, high)]:
+            continue
+        socket = sockets.get((low, high, (number >> 4) & 0xF))
+        if target['output'] == 'DisplayPort' and socket is not None:
+            target['connector'] = socket['connector']
+            target['hub'] = True
+            socket['used'] = socket['used'] or target['used']
+        else:
             target['connector'] = None
             target['chained'] = True
 
     ports = {}
     for (low, high, _), target in targets.items():
-        if target.get('chained'):
+        if target.get('chained') or target.get('hub'):
             continue
         if target['output'] in PHANTOM_OUTPUTS and not target['used']:
             continue
@@ -148,5 +160,6 @@ def read_connections():
         connections[source.device] = {'card': adapter, 'output': target['output'],
                                       'connector': target['connector'],
                                       'chained': bool(target.get('chained')),
+                                      'hub': bool(target.get('hub')),
                                       'ports': [dict(port) for port in ports.get(adapter, [])]}
     return connections
