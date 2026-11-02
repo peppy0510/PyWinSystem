@@ -35,13 +35,14 @@ from utilities import get_asset_path
 from utilities import get_frame_margins
 from utilities import load_settings
 from utilities import save_settings
+from wslbox import WslBox
 
 
 DEFAULT_SIZE = (480, 720)
 MIN_SIZE = (360, 480)
 
 MENU_ITEMS = (('Resources', 'chart'), ('Processes', 'list'), ('Hardware', 'chip'),
-              ('Disks', 'disk'), None, ('Settings', 'settings'))
+              ('Disks', 'disk'), ('WSL', 'terminal'), None, ('Settings', 'settings'))
 
 FRAME_STYLE = wx.DEFAULT_FRAME_STYLE & ~wx.CAPTION
 
@@ -129,10 +130,11 @@ class MainFrame(wx.Frame):
         self.hardwarebox = HardwareBox(self.book, theme, self.folds, self.store_settings)
         self.diskbox = DiskBox(self.book, theme, self.folds, self.store_settings,
                                self.on_disks, self.quit)
+        self.wslbox = WslBox(self.book, theme, self.folds, self.store_settings)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
                                        self.folds, self.store_settings)
         for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
-                     self.settingsbox):
+                     self.wslbox, self.settingsbox):
             self.book.AddPage(page, '')
 
         self.titlebar = TitleBar(self, theme, self.on_menu, self.toggle_maximize)
@@ -199,7 +201,7 @@ class MainFrame(wx.Frame):
         self.titlebar.set_theme(theme)
         self.sidemenu.set_theme(theme)
         for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
-                     self.settingsbox):
+                     self.wslbox, self.settingsbox):
             page.apply_theme(theme)
         apply_titlebar_theme(self, theme)
         self.Refresh()
@@ -213,6 +215,7 @@ class MainFrame(wx.Frame):
         self.processbox.set_active(listing)
         self.sampler.listing = listing
         self.sampler.detailed = self.book.GetPage(index) is self.resourcebox
+        self.wslbox.set_active(self.book.GetPage(index) is self.wslbox)
 
     def toggle_maximize(self):
         # Windows maximizes a captionless frame past the work area and over the taskbar
@@ -303,6 +306,7 @@ class MainFrame(wx.Frame):
         self.Raise()
         self.SetFocus()
         self.sampler.visible = True
+        self.wslbox.set_active(self.book.GetCurrentPage() is self.wslbox)
 
     def hide_window(self):
         if self.IsIconized() is False and self.IsMaximized() is False:
@@ -312,9 +316,12 @@ class MainFrame(wx.Frame):
         self.Show(True)
         self.Hide()
         self.sampler.visible = False
+        self.wslbox.set_active(False)
 
     def get_tray_items(self):
-        return []
+        busy = self.wslbox.is_busy()
+        return [('Restart WSL', None if busy else self.wslbox.restart),
+                ('Apply WSL settings', None if busy else self.wslbox.apply)]
 
     def on_disks(self, found):
         self.resourcebox.set_disk_names(found)
@@ -355,6 +362,7 @@ class MainFrame(wx.Frame):
         self.header_timer.Stop()
         # the WSL helpers would keep their distros awake
         self.processbox.close()
+        self.wslbox.close()
         # the drawer's capture and slide timer crash a closing frame (0xc0000374)
         self.sidemenu.close()
         self.sidemenu.timer.Stop()

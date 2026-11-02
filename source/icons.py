@@ -93,6 +93,19 @@ def draw_list(gc, cx, cy, size, colour, width):
         gc.DrawEllipse(cx - size * 0.40 - dot / 2, cy + offset - dot / 2, dot, dot)
 
 
+# a console window with a prompt, for WSL
+def draw_terminal(gc, cx, cy, size, colour, width):
+    half_width, half_height = size * 0.44, size * 0.34
+    gc.DrawRoundedRectangle(cx - half_width, cy - half_height, half_width * 2,
+                            half_height * 2, size * 0.08)
+    path = gc.CreatePath()
+    path.MoveToPoint(cx - size * 0.24, cy - size * 0.12)
+    path.AddLineToPoint(cx - size * 0.08, cy + size * 0.02)
+    path.AddLineToPoint(cx - size * 0.24, cy + size * 0.16)
+    gc.StrokePath(path)
+    gc.StrokeLine(cx + size * 0.02, cy + size * 0.16, cx + size * 0.24, cy + size * 0.16)
+
+
 def draw_minimize(gc, cx, cy, size, colour, width):
     gc.StrokeLine(cx - size * 0.40, cy, cx + size * 0.40, cy)
 
@@ -133,6 +146,7 @@ HANDLERS = {
     'settings': draw_settings,
     'menu': draw_menu,
     'list': draw_list,
+    'terminal': draw_terminal,
     'minimize': draw_minimize,
     'maximize': draw_maximize,
     'restore': draw_restore,
