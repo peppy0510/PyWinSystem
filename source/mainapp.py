@@ -35,6 +35,7 @@ from utilities import get_asset_path
 from utilities import get_frame_margins
 from utilities import load_settings
 from utilities import save_settings
+from monitorspage import MonitorsPage
 from wslbox import WslBox
 
 
@@ -42,7 +43,8 @@ DEFAULT_SIZE = (480, 720)
 MIN_SIZE = (360, 480)
 
 MENU_ITEMS = (('Resources', 'chart'), ('Processes', 'list'), ('Hardware', 'chip'),
-              ('Disks', 'disk'), ('WSL', 'terminal'), None, ('Settings', 'settings'))
+              ('Monitors', 'monitor'), ('Disks', 'disk'), ('WSL', 'terminal'), None,
+              ('Settings', 'settings'))
 
 FRAME_STYLE = wx.DEFAULT_FRAME_STYLE & ~wx.CAPTION
 
@@ -128,13 +130,16 @@ class MainFrame(wx.Frame):
         self.processbox = ProcessBox(self.book, theme, settings.get('processes'),
                                      self.store_settings, self.quit)
         self.hardwarebox = HardwareBox(self.book, theme, self.folds, self.store_settings)
+        self.monitorspage = MonitorsPage(self.book, theme, settings, self.folds,
+                                         self.store_settings, self.store_settings)
         self.diskbox = DiskBox(self.book, theme, self.folds, self.store_settings,
                                self.on_disks, self.quit)
         self.wslbox = WslBox(self.book, theme, self.folds, self.store_settings)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
-                                       self.folds, self.store_settings)
-        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
-                     self.wslbox, self.settingsbox):
+                                       self.folds, self.store_settings,
+                                       self.monitorspage.reset_all)
+        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.monitorspage,
+                     self.diskbox, self.wslbox, self.settingsbox):
             self.book.AddPage(page, '')
 
         self.titlebar = TitleBar(self, theme, self.on_menu, self.toggle_maximize)
@@ -200,8 +205,8 @@ class MainFrame(wx.Frame):
         self.book.SetBackgroundColour(wx.Colour(theme['bg']))
         self.titlebar.set_theme(theme)
         self.sidemenu.set_theme(theme)
-        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.diskbox,
-                     self.wslbox, self.settingsbox):
+        for page in (self.resourcebox, self.processbox, self.hardwarebox, self.monitorspage,
+                     self.diskbox, self.wslbox, self.settingsbox):
             page.apply_theme(theme)
         apply_titlebar_theme(self, theme)
         self.Refresh()
@@ -216,6 +221,7 @@ class MainFrame(wx.Frame):
         self.sampler.listing = listing
         self.sampler.detailed = self.book.GetPage(index) is self.resourcebox
         self.wslbox.set_active(self.book.GetPage(index) is self.wslbox)
+        self.monitorspage.set_active(self.book.GetPage(index) is self.monitorspage)
 
     def toggle_maximize(self):
         # Windows maximizes a captionless frame past the work area and over the taskbar
@@ -347,6 +353,7 @@ class MainFrame(wx.Frame):
             'rect': self.stored_rect,
             'folded_panels': sorted(self.folds),
             'processes': self.processbox.get_state(),
+            **self.monitorspage.get_state(),
         })
         save_settings(settings)
 
@@ -363,6 +370,7 @@ class MainFrame(wx.Frame):
         # the WSL helpers would keep their distros awake
         self.processbox.close()
         self.wslbox.close()
+        self.monitorspage.close()
         # the drawer's capture and slide timer crash a closing frame (0xc0000374)
         self.sidemenu.close()
         self.sidemenu.timer.Stop()

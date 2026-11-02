@@ -231,16 +231,7 @@ class HardwareBox(ScrollArea):
                            and ports and monitor.get('card') == ports[0]['card']]
                 body.append(SocketRow(board, theme, ports, owners, chained))
         panels.append(self.add_panel('gpu', 'Graphics', body))
-
-        body = []
-        for monitor in displays:
-            port = ''
-            if monitor.get('output'):
-                port = monitors.get_port_name(monitor['output'], monitor['connector'])
-            body.append(ValueCard(board, theme, monitor['label'],
-                                  join(monitor.get('adapter'), monitors.describe(monitor)), port))
-        if body:
-            panels.append(self.add_panel('displays', 'Displays', body))
+        # each display, with its controls, is on the Monitors page
 
         body = []
         for nic in found.get('nics', []):

@@ -50,7 +50,8 @@ def get_plan_tip(key):
 
 class SettingsBox(ScrollArea):
 
-    def __init__(self, parent, theme, settings, on_change, folds=None, on_fold=None):
+    def __init__(self, parent, theme, settings, on_change, folds=None, on_fold=None,
+                 on_reset_monitors=None):
         super().__init__(parent, theme)
         self.folds = folds if folds is not None else set()
         self.on_folds = on_fold
@@ -86,6 +87,9 @@ class SettingsBox(ScrollArea):
         self.efficiency = SliderCard(board, theme, 'Power supply efficiency',
                                      'Percent of wall power that reaches the parts',
                                      (50, 100, 1, 0), on_change, default=90)
+        self.resetall = ActionCard(board, theme, 'Reset every monitor',
+                                   'Put all graphics card gamma back to untouched', 'Reset',
+                                   on_reset_monitors)
         self.rates = ActionCard(board, theme, 'Rates', 'Edit the prices; changes apply at once',
                                 'Open', self.open_rates)
 
@@ -109,6 +113,8 @@ class SettingsBox(ScrollArea):
             Panel(board, theme, 'settings.appearance', 'Appearance', (self.theme_choice,),
                   self.folds, self.on_fold),
             Panel(board, theme, 'settings.sampling', 'Sampling', (self.interval,), self.folds,
+                  self.on_fold),
+            Panel(board, theme, 'settings.monitors', 'Monitors', (self.resetall,), self.folds,
                   self.on_fold),
             Panel(board, theme, 'settings.electricity', 'Electricity',
                   (self.plan, self.household, self.other, self.hdd, self.monitor,

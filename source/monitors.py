@@ -133,7 +133,12 @@ def parse_edid(data):
 def get_monitor_info(device_name):
     monitor = get_display_device(device_name, 0, EDD_GET_DEVICE_INTERFACE_NAME)
     key = monitor and get_instance_key(monitor.DeviceID)
-    return parse_edid(read_edid(*key)) if key else {}
+    if not key:
+        return {}
+    info = parse_edid(read_edid(*key))
+    # the registry path of the panel; names its stored settings across reconnects
+    info['key'] = '\\'.join(key)
+    return info
 
 
 def assign_labels(monitors):

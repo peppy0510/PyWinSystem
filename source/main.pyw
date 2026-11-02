@@ -7,6 +7,7 @@ email: peppy0510@hotmail.com
 '''
 
 
+import os
 import sys
 
 from wininstance import has_running_instance
@@ -38,11 +39,25 @@ def wait_for_previous():
         pass
 
 
+def run_headless(code):
+    # a task gives pythonw standard handles it cannot flush, and Python then exits with 120
+    # after the work is done
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.flush()
+        except Exception:
+            pass
+    os._exit(code)
+
+
 def main():
-    # the WSL tasks run without a window beside a running app, so before the instance guard
+    # the tasks run without a window beside a running app, so before the instance guard
     if '--wsl' in sys.argv:
-        from wslcli import main as run_wsl
-        sys.exit(run_wsl(sys.argv))
+        from wslcli import run_logged
+        run_headless(run_logged(sys.argv))
+    if '--monitors' in sys.argv:
+        from monitortask import main as run_monitors
+        run_headless(run_monitors(sys.argv))
     wait_for_previous()
     if not has_running_instance():
         launch()

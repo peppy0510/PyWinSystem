@@ -93,6 +93,16 @@ def draw_list(gc, cx, cy, size, colour, width):
         gc.DrawEllipse(cx - size * 0.40 - dot / 2, cy + offset - dot / 2, dot, dot)
 
 
+# a screen on its stand; without the stand it reads as a plain box at this size
+def draw_monitor(gc, cx, cy, size, colour, width):
+    half = size * 0.44
+    top = cy - size * 0.38
+    bottom = cy + size * 0.16
+    gc.DrawRoundedRectangle(cx - half, top, half * 2, bottom - top, size * 0.08)
+    gc.StrokeLine(cx, bottom, cx, cy + size * 0.34)
+    gc.StrokeLine(cx - size * 0.22, cy + size * 0.36, cx + size * 0.22, cy + size * 0.36)
+
+
 # a console window with a prompt, for WSL
 def draw_terminal(gc, cx, cy, size, colour, width):
     half_width, half_height = size * 0.44, size * 0.34
@@ -147,6 +157,7 @@ HANDLERS = {
     'menu': draw_menu,
     'list': draw_list,
     'terminal': draw_terminal,
+    'monitor': draw_monitor,
     'minimize': draw_minimize,
     'maximize': draw_maximize,
     'restore': draw_restore,
