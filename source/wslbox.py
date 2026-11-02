@@ -35,6 +35,7 @@ from meters import ValueCard
 from utilities import call_painted
 from wslcards import HOST_KEYS
 from wslcards import PORT_KEYS
+from wslcards import PortGrid
 from wslcards import TextCard
 from wslshell import is_admin
 from wslshell import log
@@ -44,17 +45,18 @@ from wslshell import log
 REFRESH_MS = 30000
 CONFIRM_MS = 3000
 PROBLEM_MS = 6000
+# the page opens with what the registry and the files tell at once; the rest shows these
+PENDING = 'Reading…'
+PENDING_VALUE = '…'
 # a slider drag writes .wslconfig once it settles, not on every step
 CONFIG_DELAY_MS = 700
 
-READ_NOTE = 'Reads WSL, the tasks and the firewall; never starts WSL'
-RESTART_NOTE = 'Shuts every distribution down, also ones another tool keeps running'
-RESTART_CONFIG_NOTE = 'Restart to use the changed .wslconfig or wsl.conf'
-REMOVE_NOTE = 'Takes our firewall rules, forwarding and tasks away; the settings stay'
-
-TASK_LABELS = ((wsltasks.BOOT, 'Boot task', 'Starts WSL, publishes the ports, runs the commands'),
-               (wsltasks.RESUME, 'Resume task', 'Recovers WSL after sleep'),
-               (wsltasks.KEEPALIVE, 'Keepalive task', 'Holds the distribution without a logon'))
+READ_NOTE = 'Reads WSL and the firewall again; a stopped WSL is not started'
+RESTART_NOTE = 'Stops every Linux distribution and starts this one again'
+RESTART_CONFIG_NOTE = 'Restart to use the changed settings below'
+REMOVE_NOTE = 'Closes the ports and stops the start at boot; your choices here are kept'
+# kept folded until it is opened once, so a newcomer meets the everyday settings first
+ADVANCED_SEEN = 'wsl.advanced.seen'
 
 ACTIONS = {
     'restart': ('Restart', 'Restarting', wslmanager.restart),
@@ -69,9 +71,12 @@ SWITCH = (('', 'Default'), ('true', 'On'), ('false', 'Off'))
 CONFIG_CARDS = (
     ('networkingMode', 'wsl2', 'Networking', 'Mirrored shares the host network',
      (('nat', 'NAT'), ('mirrored', 'Mirrored'))),
-    ('memory', 'wsl2', 'Memory', 'GB for the VM; the default is half the RAM', 'memory'),
-    ('processors', 'wsl2', 'Processors', 'Logical processors; the default is all', 'processors'),
-    ('swap', 'wsl2', 'Swap', 'GB, 0 turns it off; the default is a quarter of the RAM', 'swap'),
+    ('memory', 'wsl2', 'Memory', 'GB of the {total} GB RAM; the default {default} is half',
+     'memory'),
+    ('processors', 'wsl2', 'Processors', 'Of the {total} logical processors; the default is all',
+     'processors'),
+    ('swap', 'wsl2', 'Swap', 'GB, 0 turns it off; the default {default} is a quarter of the RAM',
+     'swap'),
     ('dnsTunneling', 'wsl2', 'DNS tunneling', 'Answers DNS through Windows', SWITCH),
     ('vmIdleTimeout', 'wsl2', 'Idle shutdown', 'Never keeps an idle VM running',
      (('', 'Default'), ('-1', 'Never'))),
@@ -120,7 +125,10 @@ class WslBox(ScrollArea):
         super().__init__(parent, theme)
         self.folds = folds if folds is not None else set()
         self.on_folds = on_fold
-        self.status = None
+        try:
+            self.status = wslmanager.get_quick_status()
+        except Exception:
+            self.status = None
         self.waiting = None
         self.reading = False
         self.read_again = False
@@ -150,11 +158,14 @@ class WslBox(ScrollArea):
             self.cards[action] = card
         self.cards['restart'].label = 'Restart WSL'
         self.cards['restart'].description = RESTART_NOTE
-        self.cards['apply'].label = 'Apply settings'
-        self.cards['uninstall'].label = 'Remove from Windows'
+        self.cards['apply'].label = 'Apply changes'
+        self.cards['apply'].set_tone('warn')
+        self.cards['uninstall'].label = 'Turn the service off'
         self.cards['uninstall'].description = REMOVE_NOTE
         self.cards['uninstall'].set_tone('warn')
         self.log_card = ActionCard(board, theme, 'Log', '', 'Open', self.open_log)
+        if ADVANCED_SEEN not in self.folds:
+            self.folds.update({'wsl.advanced', ADVANCED_SEEN})
         self.settings_cards = self.make_settings_cards()
         self.config_cards = self.make_config_cards()
         self.wsl_conf_cards = self.make_wsl_conf_cards()
@@ -175,29 +186,33 @@ class WslBox(ScrollArea):
             return TextCard(board, theme, label, description,
                             lambda value: self.store(key, value), keys, placeholder)
         return {
-            'distribution': ChoiceCard(board, theme, 'Distribution', 'Default follows wsl.exe',
-                                       (('', 'Default'),), self.on_distribution),
-            'ports': text('ports', 'Ports', 'Opened, and forwarded in NAT mode', PORT_KEYS),
-            'firewall_ports': text('firewall_ports', 'Firewall only',
-                                   'Opened without forwarding, for a proxy on Windows',
-                                   PORT_KEYS),
-            'listening': ActionCard(board, theme, 'Listening, not published', '', 'Add all',
-                                    self.add_listening),
-            'keepalive': SettingCard(board, theme, 'Keepalive',
-                                     'Keeps the distribution running without a logon',
+            'add_port': text('add_port', 'Add a port',
+                             'Open one that nothing in WSL listens on yet', PORT_KEYS,
+                             'port number'),
+            'keepalive': SettingCard(board, theme, 'Run before sign-in',
+                                     'Starts WSL at boot and keeps it running, also before '
+                                     'anyone signs in',
                                      lambda: self.store('keepalive', None)),
             'resume_action': ChoiceCard(board, theme, 'After sleep',
-                                        'Heal repairs only the part that broke',
-                                        (('restart', 'Restart'), ('heal', 'Heal'),
-                                         ('none', 'None')),
+                                        'Repair fixes only what broke; Restart drops '
+                                        'open connections',
+                                        (('restart', 'Restart'), ('heal', 'Repair'),
+                                         ('none', 'Nothing')),
                                         lambda: self.store('resume_action', None)),
-            'resume_probe_ports': text('resume_probe_ports', 'Probe ports',
-                                       'Connected from Windows after sleep',
+            'resume_probe_ports': text('resume_probe_ports', 'Check these ports',
+                                       'Repair connects to them from Windows to see they work',
                                        PORT_KEYS),
-            'resume_probe_host': text('resume_probe_host', 'Probe host',
-                                      'Looked up inside WSL after sleep', HOST_KEYS),
+            'resume_probe_host': text('resume_probe_host', 'Check this name',
+                                      'Repair looks it up inside WSL to see DNS works',
+                                      HOST_KEYS),
+            'distribution': ChoiceCard(board, theme, 'Distribution',
+                                       'The one the ports and the start at boot belong to',
+                                       (('', 'Default'),), self.on_distribution),
+            'firewall_ports': text('firewall_ports', 'Also open on Windows',
+                                   'Ports of a server running on Windows itself, not in WSL',
+                                   PORT_KEYS),
             'more': ActionCard(board, theme, 'More settings',
-                               'Startup commands and NAT addresses live in wsl.json', 'Open',
+                               'Startup commands and NAT addresses, in wsl.json', 'Open',
                                self.open_settings),
         }
 
@@ -208,6 +223,8 @@ class WslBox(ScrollArea):
             def changed(key=key, section=section):
                 self.queue_config(key, section)
             if isinstance(kind, str):
+                description = description.format(total=self.bounds[kind][1],
+                                                 default=self.defaults[kind])
                 cards[key] = SliderCard(board, theme, label, description, self.bounds[kind],
                                         changed, default=self.defaults[kind])
             else:
@@ -336,7 +353,10 @@ class WslBox(ScrollArea):
     def store(self, key, value):
         settings = wslsettings.load()[0]
         card = self.settings_cards[key]
-        if key in ('ports', 'firewall_ports', 'resume_probe_ports'):
+        if key == 'add_port':
+            key, value = 'ports', sorted(set(settings['ports']) | set(parse_ports(value)))
+            card.SetValue('')
+        elif key in ('firewall_ports', 'resume_probe_ports'):
             value = parse_ports(value)
             card.SetValue(', '.join(map(str, value)))
         elif key in ('keepalive', 'resume_action'):
@@ -345,16 +365,19 @@ class WslBox(ScrollArea):
         wslsettings.save(settings)
         self.read()
 
+    def toggle_port(self, port, on):
+        settings = wslsettings.load()[0]
+        ports = set(settings['ports'])
+        if on:
+            ports.add(port)
+        else:
+            ports.discard(port)
+        settings['ports'] = sorted(ports)
+        wslsettings.save(settings)
+        self.read()
+
     def on_distribution(self):
         self.store('distribution', self.settings_cards['distribution'].GetValue())
-
-    def add_listening(self):
-        status = self.status or {}
-        listening = (status.get('listening') or {}).get('tcp') or []
-        settings = wslsettings.load()[0]
-        missing = [v for v in listening if v not in settings['ports']]
-        if missing:
-            self.store('ports', ', '.join(map(str, settings['ports'] + missing)))
 
     def queue_config(self, key, section):
         card = self.config_cards[key]
@@ -472,17 +495,12 @@ class WslBox(ScrollArea):
             choice.relayout()
         pinned = settings['distribution']
         choice.SetValue('' if pinned == default else pinned)
-        for key in ('ports', 'firewall_ports', 'resume_probe_ports'):
+        for key in ('firewall_ports', 'resume_probe_ports'):
             cards[key].SetValue(', '.join(map(str, settings[key])))
         cards['resume_probe_host'].SetValue(settings['resume_probe_host'])
         cards['keepalive'].SetValue(settings['keepalive'])
         cards['resume_action'].SetValue(settings['resume_action'])
-        listening = (status.get('listening') or {}).get('tcp')
-        if listening is None:
-            cards['listening'].set_description('Read only while the distribution runs')
-        else:
-            cards['listening'].set_description(
-                join([v for v in listening if v not in settings['ports']]))
+        return settings
 
     def update_config_cards(self):
         # the file, not the status: a status read may have started before the last write
@@ -523,80 +541,117 @@ class WslBox(ScrollArea):
             return [self.cards['restart']]
         names = {d['name']: d for d in status['distributions']}
         found = names.get(status['distribution'])
+        partial = status.get('partial')
         if found:
             detail = f'Version {found["version"]}' + (' · default' if found['default'] else '')
-            state = 'Running' if status['running'] else 'Stopped'
+            state = PENDING_VALUE if partial else ('Running' if status['running'] else 'Stopped')
         else:
             detail, state = 'Not installed', '—'
         rows.append(ValueCard(board, theme, status['distribution'] or 'No distribution',
                               detail, state, not found))
-        mode = 'Mirrored' if status['mode'] == 'mirrored' else 'NAT'
-        rows.append(ValueCard(board, theme, 'Networking', 'networkingMode in .wslconfig', mode))
-        if status['keepalive']:
-            held = {'task': 'Keepalive task', 'process': 'A wsl.exe process'}.get(
-                status['held_by'], 'Nothing')
-            rows.append(ValueCard(board, theme, 'Held by', 'Keepalive keeps WSL running', held,
-                                  status['running'] and status['held_by'] is None))
+        if status['mode'] == 'mirrored':
+            mode, note = 'Mirrored', 'WSL shares the network of this PC'
+        else:
+            mode, note = 'NAT', 'WSL sits behind this PC; ports are forwarded to it'
+        rows.append(ValueCard(board, theme, 'Networking', note, mode))
         restart = self.cards['restart']
         restart.set_description(RESTART_CONFIG_NOTE if self.config_changed else RESTART_NOTE)
         restart.set_tone('warn' if self.config_changed else 'plain')
         rows.append(restart)
         return rows
 
-    def get_service_rows(self, status):
+    def get_unapplied(self, status):
+        return [p.replace(', press Apply', '') for p in status.get('problems') or []
+                if 'press Apply' in p]
+
+    def get_port_rows(self, status, settings):
         board, theme = self.content, self.theme
+        partial = status.get('partial')
+        listening = status.get('listening') or {}
+        heard = set(listening.get('tcp', [])) | set(listening.get('udp', []))
+        names = listening.get('names', {})
+        opened = set((status.get('opened') or {}).get('windows', []))
+        chosen = set(settings['ports'])
+        ports = []
+        for port in sorted(chosen | heard):
+            name = names.get(str(port))
+            on = port in chosen
+            warn = False
+            if partial:
+                note = PENDING
+            elif on and port in opened:
+                silent = port not in heard and status.get('listening') is not None
+                note = ('Open, but nothing in WSL answers on it now' if silent else
+                        'Open · other devices can reach it')
+            elif on:
+                note = 'Turned on · Apply opens it'
+            elif port in opened:
+                note, warn = 'Turned off · open until Apply', True
+            else:
+                note = 'Only this PC can reach it · click to open it'
+            ports.append({'port': port, 'label': f'{port} {name}' if name else str(port),
+                          'on': on, 'warn': warn, 'note': note})
         rows = []
-        tasks = status.get('tasks', {})
-        unapplied = [p for p in status.get('problems', []) if 'press Apply' in p]
-        for name, label, note in TASK_LABELS:
-            state = tasks.get(name, '—')
-            if name == wsltasks.KEEPALIVE and not status.get('keepalive') and state == 'Missing':
-                continue
-            # nothing configured needs no task, so a missing one only warns when Apply would add it
-            rows.append(ValueCard(board, theme, label, note,
-                                  'Not registered' if state == 'Missing' else state,
-                                  state == 'Missing' and bool(unapplied)))
-        self.cards['apply'].set_description(unapplied[0].replace(', press Apply', '')
-                                            if unapplied else 'The settings are in effect')
-        self.cards['apply'].set_tone('warn' if unapplied else 'plain')
-        self.log_card.set_description(status.get('last_log') or 'Nothing logged yet')
-        rows += [self.cards['apply'], self.cards['uninstall'], self.log_card]
+        if ports:
+            silent = [p['port'] for p in ports
+                      if p['on'] and p['port'] not in heard and status.get('listening') is not None]
+            summary = f'{len(chosen)} of {len(ports)} open'
+            note = 'Lit ones are open to other devices; click one to turn it on or off'
+            if silent and not partial:
+                note = f'Nothing answers on {", ".join(map(str, silent))} now'
+            rows.append(ValueCard(board, theme, 'Ports', note, summary))
+            grid = PortGrid(board, theme, self.toggle_port)
+            grid.set_ports(ports)
+            rows.append(grid)
+        elif partial:
+            rows.append(ValueCard(board, theme, PENDING, '', ''))
+        elif status.get('running'):
+            rows.append(ValueCard(board, theme, 'Nothing in WSL listens for other devices',
+                                  'Start a server in WSL, or add a port below', ''))
+        else:
+            rows.append(ValueCard(board, theme, 'WSL is not running',
+                                  'Its servers show here once it runs', ''))
+        rows.append(self.settings_cards['add_port'])
         return rows
 
-    def get_port_rows(self, status):
+    def get_run_rows(self, status, settings):
         board, theme = self.content, self.theme
-        if status.get('failed'):
-            return []
-        opened = status['opened']
-        rows = [ValueCard(board, theme, 'Published', join(status['published']),
-                          str(len(status['published'])))]
-        where = 'Windows and Hyper-V firewalls' if status['mode'] == 'mirrored' \
-            else 'Windows firewall'
-        rows.append(ValueCard(board, theme, 'Opened', f'{join(opened["windows"])} · {where}',
-                              str(len(opened['windows']))))
-        if status['mode'] == 'nat':
-            forwarded = status.get('forwarded', [])
-            rows.append(ValueCard(board, theme, 'Forwarded',
-                                  ', '.join(f'{a}:{p} → {c}' for a, p, c, _ in forwarded)
-                                  or 'none', str(len(forwarded))))
-        listening = status.get('listening')
-        if listening is None:
-            rows.append(ValueCard(board, theme, 'Listening in WSL',
-                                  'Read only while the distribution runs', '—'))
+        cards = self.settings_cards
+        rows = [cards['keepalive']]
+        boot = (status.get('tasks') or {}).get(wsltasks.BOOT)
+        if boot is None:
+            started = PENDING_VALUE
         else:
-            rows.append(ValueCard(board, theme, 'Listening in WSL',
-                                  f'TCP {join(listening["tcp"])} · UDP {join(listening["udp"])}',
-                                  str(len(listening['tcp']) + len(listening['udp']))))
-            idle = status.get('idle_ports', [])
-            rows.append(ValueCard(board, theme, 'Published, nothing listening', join(idle),
-                                  str(len(idle))))
+            started = 'No' if boot == 'Missing' else 'Yes'
+        rows.append(ValueCard(board, theme, 'Starts at boot',
+                              'Opens the ports and runs the startup commands, set up by Apply',
+                              started, boot == 'Missing' and bool(self.get_unapplied(status))))
+        if settings['keepalive'] and not status.get('partial'):
+            held = {'task': 'Yes', 'process': 'Yes, by another program'}.get(
+                status['held_by'], 'No')
+            rows.append(ValueCard(board, theme, 'Kept running now',
+                                  'Run before sign-in holds the distribution', held,
+                                  bool(status['running']) and status['held_by'] is None))
+        rows.append(cards['resume_action'])
+        # the checks only matter to Repair
+        if settings['resume_action'] == 'heal':
+            rows += [cards['resume_probe_ports'], cards['resume_probe_host']]
+        return rows
+
+    def get_advanced_rows(self, status):
+        cards = self.settings_cards
+        rows = []
+        # with one distribution there is nothing to choose
+        if len(cards['distribution'].options) > 1:
+            rows.append(cards['distribution'])
+        self.log_card.set_description(status.get('last_log') or 'Nothing logged yet')
+        rows += [cards['firewall_ports'], cards['more'], self.cards['uninstall'], self.log_card,
+                 self.read_card]
         return rows
 
     def get_problem_rows(self, status):
         board, theme = self.content, self.theme
-        problems = status.get('problems', [])
-        if not problems:
-            return [ValueCard(board, theme, 'Nothing to fix', '', '')]
+        problems = [p for p in status.get('problems') or [] if 'press Apply' not in p]
         return [ValueCard(board, theme, problem, '', '', True) for problem in problems]
 
     def build(self):
@@ -608,53 +663,52 @@ class WslBox(ScrollArea):
             holder = card.GetContainingSizer()
             if holder is not None:
                 holder.Detach(card)
-        for card in (list(self.settings_cards.values()) + list(self.config_cards.values()) +
-                     list(self.wsl_conf_cards.values())):
             card.Hide()
         board, theme = self.content, self.theme
         panels = []
         status = self.status
-        if status is None:
-            panels.append(Panel(board, theme, 'wsl.read', 'WSL', (self.read_card,),
+        if status is None or status.get('failed'):
+            rows = [ValueCard(board, theme, problem, '', '', True)
+                    for problem in (status or {}).get('problems', [])]
+            panels.append(Panel(board, theme, 'wsl.state', 'WSL', rows + [self.read_card],
                                 self.folds, self.on_fold))
         else:
             mode = status.get('mode', '')
+            settings = self.update_settings_cards(status)
+            self.update_config_cards()
             panels.append(Panel(board, theme, 'wsl.state', 'WSL', self.get_state_rows(status),
                                 self.folds, self.on_fold,
                                 subtitle='Mirrored' if mode == 'mirrored' else mode.upper()))
-            panels.append(Panel(board, theme, 'wsl.service', 'Service',
-                                self.get_service_rows(status), self.folds, self.on_fold))
-            port_rows = self.get_port_rows(status)
-            if port_rows:
-                panels.append(Panel(board, theme, 'wsl.ports', 'Ports', port_rows, self.folds,
-                                    self.on_fold))
-            if not status.get('failed'):
-                self.update_settings_cards(status)
-                self.update_config_cards()
-                rows = list(self.settings_cards.values())
-                # with one distribution there is nothing to choose
-                if len(self.settings_cards['distribution'].options) < 2:
-                    rows.remove(self.settings_cards['distribution'])
-                panels.append(Panel(board, theme, 'wsl.settings', 'Settings', rows, self.folds,
-                                    self.on_fold, subtitle='press Apply after a change'))
-                panels.append(Panel(board, theme, 'wsl.config', '.wslconfig',
-                                    list(self.config_cards.values()), self.folds, self.on_fold,
-                                    subtitle='used after Restart WSL'))
-                if status.get('wsl_conf') is not None:
-                    self.update_wsl_conf_cards(status)
-                    rows = list(self.wsl_conf_cards.values())
-                else:
-                    rows = [ValueCard(board, theme, 'Read while the distribution runs',
-                                      'Starting WSL just to read it is left to you', '')]
-                panels.append(Panel(board, theme, 'wsl.conf', '/etc/wsl.conf', rows,
-                                    self.folds, self.on_fold,
-                                    subtitle=f'in {status.get("distribution", "")}'))
-            problems = status.get('problems', [])
-            panels.append(Panel(board, theme, 'wsl.problems', 'Problems',
-                                self.get_problem_rows(status), self.folds, self.on_fold,
-                                subtitle=str(len(problems)) if problems else ''))
-            panels.append(Panel(board, theme, 'wsl.read', 'Read', (self.read_card,),
-                                self.folds, self.on_fold))
+            unapplied = self.get_unapplied(status)
+            if unapplied:
+                self.cards['apply'].set_description(' · '.join(unapplied))
+                panels.append(Panel(board, theme, 'wsl.apply', 'Not applied yet',
+                                    (self.cards['apply'],), self.folds, self.on_fold))
+            problems = self.get_problem_rows(status)
+            if problems:
+                panels.append(Panel(board, theme, 'wsl.problems', 'Problems', problems,
+                                    self.folds, self.on_fold, subtitle=str(len(problems))))
+            panels.append(Panel(board, theme, 'wsl.open', 'Open to the network',
+                                self.get_port_rows(status, settings), self.folds, self.on_fold,
+                                subtitle='other devices reach WSL on these'))
+            panels.append(Panel(board, theme, 'wsl.run', 'Start and recover',
+                                self.get_run_rows(status, settings), self.folds, self.on_fold))
+            panels.append(Panel(board, theme, 'wsl.config', 'WSL settings',
+                                list(self.config_cards.values()), self.folds, self.on_fold,
+                                subtitle='.wslconfig · used after Restart WSL'))
+            if status.get('wsl_conf') is not None:
+                self.update_wsl_conf_cards(status)
+                rows = list(self.wsl_conf_cards.values())
+            elif status.get('partial'):
+                rows = [ValueCard(board, theme, PENDING, '', '')]
+            else:
+                rows = [ValueCard(board, theme, 'Shown while the distribution runs',
+                                  'It is not started just to read this', '')]
+            panels.append(Panel(board, theme, 'wsl.conf', 'Distribution settings', rows,
+                                self.folds, self.on_fold,
+                                subtitle=f'/etc/wsl.conf in {status.get("distribution", "")}'))
+            panels.append(Panel(board, theme, 'wsl.advanced', 'Advanced',
+                                self.get_advanced_rows(status), self.folds, self.on_fold))
         self.set_panels(panels)
         self.bind_children()
         self.apply_theme(theme)

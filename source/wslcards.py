@@ -12,7 +12,12 @@ import string
 import wx
 
 from controls import CardBase
+from controls import ChipGrid
 from controls import NumberEntry
+from controls import draw_button
+from controls import draw_row_face
+from hovertip import hide_hover_tip
+from hovertip import show_hover_tip
 from utilities import BUTTON_HEIGHT
 from utilities import fill_rect
 from utilities import get_font
@@ -126,3 +131,54 @@ class TextCard(NumberEntry, CardBase):
                             top + ink_bottom + 3)
         gc.ResetClip()
         return rect.x
+
+
+class PortGrid(ChipGrid):
+    '''Every port in one wrapping grid, lit where it is open to the network; many ports stay
+    readable at a glance, and a tip tells what each one is and does.'''
+
+    def __init__(self, parent, theme, on_toggle):
+        super().__init__(parent, theme, [])
+        self.on_toggle = on_toggle
+        self.ports = []
+
+    def set_ports(self, ports):
+        '''ports: dicts of port, label, on, warn and note, in the order to show.'''
+        self.ports = list(ports)
+        self.set_options([port['label'] for port in self.ports])
+
+    def choose(self):
+        index = self.hit_test(self.up_position)
+        if index < 0 or index != self.down_index:
+            return
+        port = self.ports[index]
+        port['on'] = not port['on']
+        self.Refresh()
+        self.on_toggle(port['port'], port['on'])
+
+    def on_track(self, event):
+        super().on_track(event)
+        if 0 <= self.marked < len(self.ports):
+            port = self.ports[self.marked]
+            show_hover_tip(self, self.theme, [(port['label'], 'dim'), (port['note'], 'text')],
+                           self.ClientToScreen(event.GetPosition()))
+        else:
+            hide_hover_tip(self)
+
+    def on_leave(self, event):
+        super().on_leave(event)
+        hide_hover_tip(self)
+
+    def draw(self, gc, width, height):
+        draw_row_face(gc, self.theme, width, height, self.first, self.last)
+        for index, port in enumerate(self.ports):
+            if port['on']:
+                state = 'lit'
+            elif self.pressed and index == self.down_index and index == self.marked:
+                state = 'down'
+            elif index == self.marked:
+                state = 'hover'
+            else:
+                state = 'plain'
+            draw_button(gc, self.theme, self.get_chip_rect(index, width), port['label'], state,
+                        'warn' if port['warn'] else None)
