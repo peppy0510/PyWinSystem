@@ -69,16 +69,28 @@ class SocketRow(CardBase):
 
     HEIGHT = 60
 
-    def __init__(self, parent, theme, ports, owners):
-        super().__init__(parent, theme, 'Sockets',
-                         'Filled in use, outlined free; driver order, not the bracket')
-        self.ports = ports
+    def __init__(self, parent, theme, ports, owners, chained=()):
+        description = 'Filled in use, outlined free; driver order, not the bracket'
+        # the socket a chain hangs from cannot be told, so each chained display gets a socket
+        # of its own after the real ones
+        if chained:
+            description = f'MST: chained from one of the sockets · {description}'
+        super().__init__(parent, theme, 'Sockets', description)
+        self.ports = list(ports) + [
+            {'card': monitor.get('card'), 'output': 'DisplayPort', 'connector': None,
+             'used': True, 'monitor': monitor, 'name': f'MST {index + 1}'}
+            for index, monitor in enumerate(chained)]
         self.owners = owners
         self.port_rects = []
         self.SetMinSize(wx.Size(-1, self.HEIGHT))
 
     def get_owner(self, port):
-        return self.owners.get((port['card'], port['output'], port['connector']))
+        return port.get('monitor') or self.owners.get(
+            (port['card'], port['output'], port['connector']))
+
+    @staticmethod
+    def get_name(port):
+        return port.get('name') or monitors.get_port_name(port['output'], port['connector'])
 
     def update_label_tip(self, point=None):
         point = point or wx.GetMousePosition()
@@ -90,9 +102,8 @@ class SocketRow(CardBase):
                     text = f'{owner["label"]}  {monitors.describe(owner)}'
                 else:
                     text = 'In use' if port['used'] else 'Free'
-                show_hover_tip(self, self.theme, [
-                    (monitors.get_port_name(port['output'], port['connector']), 'dim'),
-                    (text, 'text')], point)
+                show_hover_tip(self, self.theme, [(self.get_name(port), 'dim'), (text, 'text')],
+                               point)
                 return
         super().update_label_tip(point)
 
@@ -122,8 +133,7 @@ class SocketRow(CardBase):
             gc.StrokePath(path)
             rect = wx.Rect(int(x - PORT_GAP / 2), int(top + PORT_HEIGHT + 4),
                            PORT_WIDTH + PORT_GAP, 14)
-            draw_text_in(gc, monitors.get_port_name(port['output'], port['connector']), rect,
-                         get_font(8), ink, back=theme['face'])
+            draw_text_in(gc, self.get_name(port), rect, get_font(8), ink, back=theme['face'])
             self.port_rects.append((wx.Rect(int(x - PORT_GAP / 2), int(top - 4),
                                             PORT_WIDTH + PORT_GAP, PORT_HEIGHT + 22), port))
         return left - PORT_GAP / 2
@@ -216,7 +226,10 @@ class HardwareBox(ScrollArea):
             # two cards of one model take their socket lists in turn
             same = card_ports.get(gpu['name']) or []
             if same:
-                body.append(SocketRow(board, theme, same.pop(0), owners))
+                ports = same.pop(0)
+                chained = [monitor for monitor in displays if monitor.get('chained')
+                           and ports and monitor.get('card') == ports[0]['card']]
+                body.append(SocketRow(board, theme, ports, owners, chained))
         panels.append(self.add_panel('gpu', 'Graphics', body))
 
         body = []

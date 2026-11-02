@@ -99,7 +99,8 @@ def get_port_key(port):
 # 'ports': [...]}} for the active displays; ports lists every socket of that graphics
 # card with whether a display uses it. No administrator rights, about 1 ms for two cards.
 # connector counts the ports of one kind on one card as the driver numbers them, not
-# their order on the bracket
+# their order on the bracket. A display chained over DisplayPort MST has no socket of its
+# own: it gets 'connector': None and 'chained': True
 def read_connections():
     targets = {}
     for path in query_paths(QDC_ALL_PATHS):
@@ -115,8 +116,20 @@ def read_connections():
         if path.flags & PATH_ACTIVE:
             target['used'] = True
 
+    # the sockets of a card share one block of target ids; MST adds a target outside it for
+    # every chained display (RTX 4070 Ti: sockets 0x1100-0x1106, two chains 0x1204, 0x1224)
+    blocks = {}
+    for low, high, number in targets:
+        blocks[(low, high)] = min(blocks.get((low, high), number >> 8), number >> 8)
+    for (low, high, number), target in targets.items():
+        if number >> 8 != blocks[(low, high)]:
+            target['connector'] = None
+            target['chained'] = True
+
     ports = {}
     for (low, high, _), target in targets.items():
+        if target.get('chained'):
+            continue
         if target['output'] in PHANTOM_OUTPUTS and not target['used']:
             continue
         ports.setdefault((low, high), []).append(target)
@@ -134,5 +147,6 @@ def read_connections():
             continue
         connections[source.device] = {'card': adapter, 'output': target['output'],
                                       'connector': target['connector'],
+                                      'chained': bool(target.get('chained')),
                                       'ports': [dict(port) for port in ports.get(adapter, [])]}
     return connections

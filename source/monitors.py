@@ -180,7 +180,8 @@ def get_diagonal(monitor):
 
 def get_port_name(output, connector):
     short = {'DisplayPort': 'DP', 'USB-C DisplayPort': 'USB-C'}.get(output, output)
-    return f'{short} {connector + 1}'
+    # a display chained over MST has no socket number of its own
+    return f'{short} chain' if connector is None else f'{short} {connector + 1}'
 
 
 def describe(monitor):
