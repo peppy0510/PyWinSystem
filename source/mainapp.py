@@ -8,10 +8,12 @@ email: peppy0510@hotmail.com
 
 
 import os
+import subprocess
 import threading
 import time
 import winreg
 import wx
+import wx.adv
 
 import processes
 
@@ -25,6 +27,10 @@ from settingsbox import SettingsBox
 from sidemenu import SideMenu
 from titlebar import TitleBar
 from tray import TrayIcon
+from updatebox import UpdateBox
+from updater import Updater
+from updater import restart_source
+from updater import wx_call
 from utilities import APP_NAME
 from utilities import THEMES
 from utilities import apply_clip_siblings
@@ -79,6 +85,7 @@ class SamplerThread(threading.Thread):
         self.interval = 1.0
         self.running = True
         self.visible = True
+        self.updater = None
 
     def run(self):
         target = time.perf_counter()
@@ -89,6 +96,9 @@ class SamplerThread(threading.Thread):
                 time.sleep(delay)
             else:
                 target = time.perf_counter()
+            # hidden in the tray, the app still hears of a new release
+            if self.running and self.updater is not None and self.updater.is_due():
+                wx_call(self.updater.tick)
             if not self.running or not self.visible:
                 continue
             if self.listing:
@@ -137,23 +147,30 @@ class MainFrame(wx.Frame):
         self.wslbox = WslBox(self.book, theme, self.folds, self.store_settings)
         self.settingsbox = SettingsBox(self.book, theme, settings, self.on_settings,
                                        self.folds, self.store_settings,
-                                       self.monitorspage.reset_all)
+                                       self.monitorspage.reset_all, self.on_check_updates)
         for page in (self.resourcebox, self.processbox, self.hardwarebox, self.monitorspage,
                      self.diskbox, self.wslbox, self.settingsbox):
             self.book.AddPage(page, '')
 
         self.titlebar = TitleBar(self, theme, self.on_menu, self.toggle_maximize)
+        # before the menu, which opens over it
+        self.updatebox = UpdateBox(self, theme, self.on_update_action)
+        self.updater = Updater(settings, self.on_update_checked)
+        self.release = None
         self.sidemenu = SideMenu(self, theme, MENU_ITEMS, self.on_select)
         apply_clip_siblings(self.book)
+        apply_clip_siblings(self.updatebox)
 
         sizer = wx.BoxSizer(wx.VERTICAL)
         sizer.Add(self.titlebar, 0, wx.EXPAND)
+        sizer.Add(self.updatebox, 0, wx.EXPAND)
         sizer.Add(self.book, 1, wx.EXPAND)
         self.SetSizer(sizer)
 
         self.header_timer = wx.Timer(self)
         self.Bind(wx.EVT_TIMER, self.update_header, self.header_timer)
         self.sampler = SamplerThread(self)
+        self.sampler.updater = self.updater
         self.resourcebox.display = DisplayState()
         self.resourcebox.display.start()
         self.apply_theme()
@@ -205,6 +222,7 @@ class MainFrame(wx.Frame):
         self.book.SetBackgroundColour(wx.Colour(theme['bg']))
         self.titlebar.set_theme(theme)
         self.sidemenu.set_theme(theme)
+        self.updatebox.set_theme(theme)
         for page in (self.resourcebox, self.processbox, self.hardwarebox, self.monitorspage,
                      self.diskbox, self.wslbox, self.settingsbox):
             page.apply_theme(theme)
@@ -276,8 +294,11 @@ class MainFrame(wx.Frame):
         self.sampler.interval = float(values['interval'])
         if values['tray_icon'] and self.tray is None:
             self.tray = TrayIcon(self)
+            self.tray.Bind(wx.adv.EVT_TASKBAR_BALLOON_CLICK, lambda event: self.show_window())
         elif not values['tray_icon'] and self.tray is not None:
             self.remove_tray()
+        self.settingsbox.update_tray_note()
+        self.updater.enabled = values['update_check']
         self.resourcebox.set_interval(values['interval'])
         self.processbox.set_interval(values['interval'])
         self.resourcebox.set_electricity(values)
@@ -329,6 +350,95 @@ class MainFrame(wx.Frame):
         return [('Restart WSL', None if busy else self.wslbox.restart),
                 ('Apply WSL settings', None if busy else self.wslbox.apply)]
 
+    def on_check_updates(self):
+        self.settingsbox.check_now.set_tone('plain')
+        self.settingsbox.check_now.set_description('Checking…')
+        self.updater.check(forced=True)
+
+    def get_checked_time(self):
+        return time.strftime('%H:%M', time.localtime(self.updater.checked_at))
+
+    def on_update_checked(self, release, result, forced):
+        # a queued call can arrive after close
+        if not self:
+            return
+        card = self.settingsbox.check_now
+        card.set_tone('warn' if result == 'error' else 'plain')
+        if result == 'error':
+            card.set_description('Could not reach GitHub')
+            return
+        self.store_settings()
+        if result == 'found':
+            card.set_description(f'{release["version"]} is available')
+            self.show_update(release)
+        elif result == 'skipped':
+            card.set_description(f'{self.updater.skipped} skipped, '
+                                 f'checked at {self.get_checked_time()}')
+        else:
+            card.set_description(f'Up to date, checked at {self.get_checked_time()}')
+
+    def show_update(self, release):
+        # a notice already updating stays as it is
+        if self.updatebox.IsShown() and self.updatebox.state == 'busy':
+            return
+        self.release = release
+        self.updatebox.show_release(release)
+        if not self.updatebox.IsShown():
+            self.updatebox.Show()
+            self.Layout()
+        if (self.tray is not None and self.settingsbox.tray_notice.GetValue()
+                and not self.tray.is_window_shown()):
+            self.tray.ShowBalloon(f'{APP_NAME} {release["version"]}',
+                                  'A new version is available', 10000, wx.ICON_INFORMATION)
+
+    def hide_update(self):
+        self.updatebox.Hide()
+        self.Layout()
+
+    def on_update_action(self, key):
+        release = self.release
+        if key == 'skip':
+            self.updater.skipped = release['version']
+            self.store_settings()
+            self.settingsbox.check_now.set_description(f'{release["version"]} skipped')
+            self.hide_update()
+        elif key == 'later':
+            self.hide_update()
+        elif key == 'cancel':
+            self.updater.cancel()
+        elif release['kind'] == 'page':
+            # explorer hands the link to the shell, as the About card does
+            subprocess.Popen(['explorer', release['page']])
+            self.hide_update()
+        else:
+            if release['kind'] == 'installer':
+                self.updatebox.set_busy('Downloading 0%', 0.0)
+            else:
+                self.updatebox.set_busy('Updating…')
+            self.updater.update(release, self.on_update_progress, self.on_update_done)
+
+    def on_update_progress(self, ratio):
+        if not self or self.updatebox.state != 'busy':
+            return
+        message = f'Downloading {int(ratio * 100)}%'
+        if message != self.updatebox.message:
+            self.updatebox.set_busy(message, ratio)
+
+    def on_update_done(self, error):
+        if not self:
+            return
+        if error is not None:
+            self.updatebox.set_failed(error)
+            return
+        if self.release['kind'] == 'git':
+            try:
+                restart_source()
+            except OSError:
+                self.updatebox.set_failed('Updated, start the app again to use it')
+                return
+        # the installer replaces the app's files once it is gone
+        self.quit()
+
     def on_disks(self, found):
         self.resourcebox.set_disk_names(found)
         self.sampler.sampler.sensors.set_disks(found)
@@ -354,6 +464,8 @@ class MainFrame(wx.Frame):
             'rect': self.stored_rect,
             'folded_panels': sorted(self.folds),
             'processes': self.processbox.get_state(),
+            'update_checked_at': self.updater.checked_at,
+            'update_skipped': self.updater.skipped,
             **self.monitorspage.get_state(),
         })
         save_settings(settings)
@@ -368,6 +480,7 @@ class MainFrame(wx.Frame):
             return
         self.sampler.running = False
         self.header_timer.Stop()
+        self.updater.cancel()
         # the WSL helpers would keep their distros awake
         self.processbox.close()
         self.wslbox.close()

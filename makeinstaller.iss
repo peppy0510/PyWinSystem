@@ -18,6 +18,8 @@ VersionInfoProductVersion="0.1.0"
 VersionInfoCompany="Taehong Kim"
 VersionInfoCopyright="Taehong Kim"
 ArchitecturesInstallIn64BitMode="x64compatible"
+CloseApplications=yes
+RestartApplications=no
 
 [Files]
 Source: ".dist\*"; DestDir: "{app}"; Flags: recursesubdirs
@@ -25,3 +27,6 @@ Source: ".dist\*"; DestDir: "{app}"; Flags: recursesubdirs
 [Icons]
 Name: "{group}\PyWinSystem"; Filename: "{app}\PyWinSystem.exe"
 Name: "{commondesktop}\PyWinSystem"; Filename: "{app}\PyWinSystem.exe"
+
+[Run]
+Filename: "{app}\PyWinSystem.exe"; Description: "Launch PyWinSystem"; Flags: nowait postinstall skipifsilent

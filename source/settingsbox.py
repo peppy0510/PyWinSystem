@@ -29,6 +29,9 @@ from utilities import get_asset_path
 THEMES = (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark'))
 INTERVALS = ((1, '1 s'), (2, '2 s'), (5, '5 s'))
 PLANS = (('kr_home', 'KR home'), ('kr_flat', 'KR flat'), ('us', 'US'), ('jp', 'JP'))
+UPDATE_NOTE = 'Look for a new release on GitHub'
+TRAY_NOTE = 'Also from the tray icon while the window is hidden'
+TRAY_NOTE_OFF = 'Needs the tray icon, under Window'
 
 
 # read on each hover, as an edit to tariffs.json applies at once
@@ -51,7 +54,7 @@ def get_plan_tip(key):
 class SettingsBox(ScrollArea):
 
     def __init__(self, parent, theme, settings, on_change, folds=None, on_fold=None,
-                 on_reset_monitors=None):
+                 on_reset_monitors=None, on_check=None):
         super().__init__(parent, theme)
         self.folds = folds if folds is not None else set()
         self.on_folds = on_fold
@@ -92,6 +95,11 @@ class SettingsBox(ScrollArea):
                                    on_reset_monitors)
         self.rates = ActionCard(board, theme, 'Rates', 'Edit the prices; changes apply at once',
                                 'Open', self.open_rates)
+        self.check_updates = SettingCard(board, theme, 'Check for updates',
+                                         'Once a day, a notice when one is out', on_change)
+        self.tray_notice = SettingCard(board, theme, 'Tray notification', TRAY_NOTE, on_change)
+        self.check_now = ActionCard(board, theme, 'Latest release', UPDATE_NOTE, 'Check now',
+                                    on_check)
 
         self.ontop.SetValue(settings.get('on_top', False))
         self.plan.SetValue(settings.get('plan', 'kr_home'))
@@ -105,6 +113,9 @@ class SettingsBox(ScrollArea):
         self.autohide.SetValue(settings.get('auto_hide_menu', False))
         self.theme_choice.SetValue(settings.get('theme', 'dark'))
         self.interval.SetValue(settings.get('interval', 1))
+        self.check_updates.SetValue(settings.get('update_check', True))
+        self.tray_notice.SetValue(settings.get('update_tray', True))
+        self.update_tray_note()
 
         self.set_panels([
             Panel(board, theme, 'settings.window', 'Window',
@@ -120,6 +131,9 @@ class SettingsBox(ScrollArea):
                   (self.plan, self.household, self.other, self.hdd, self.monitor,
                    self.efficiency, self.rates),
                   self.folds, self.on_fold),
+            Panel(board, theme, 'settings.updates', 'Updates',
+                  (self.check_updates, self.tray_notice, self.check_now), self.folds,
+                  self.on_fold),
             Panel(board, theme, 'settings.about', 'About',
                   (AboutCard(board, theme, f'{APP_NAME} {APP_VERSION}',
                              (APP_AUTHOR, APP_EMAIL), 'GitHub', self.on_home,
@@ -137,7 +151,16 @@ class SettingsBox(ScrollArea):
                 'plan': self.plan.GetValue(), 'household_kwh': self.household.GetValue(),
                 'other_watts': self.other.GetValue(), 'hdd_watts': self.hdd.GetValue(),
                 'monitor_watts': self.monitor.GetValue(),
-                'psu_efficiency': self.efficiency.GetValue()}
+                'psu_efficiency': self.efficiency.GetValue(),
+                'update_check': self.check_updates.GetValue(),
+                'update_tray': self.tray_notice.GetValue()}
+
+    def update_tray_note(self):
+        # the balloon pops up from the tray icon
+        note = TRAY_NOTE if self.tray.GetValue() else TRAY_NOTE_OFF
+        if note != self.tray_notice.description:
+            self.tray_notice.description = note
+            self.tray_notice.Refresh()
 
     def open_rates(self):
         # .json often has no program attached, so ask for Notepad by name
