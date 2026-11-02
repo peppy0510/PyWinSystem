@@ -50,6 +50,8 @@ HARDWARE_SLIDERS = ((ddcci.BRIGHTNESS, 'Brightness', 'Backlight inside the monit
 
 SOFTWARE_CHANNELS = (('red', 'Red'), ('green', 'Green'), ('blue', 'Blue'))
 
+KEPT_NOTE = 'Set again after sign-in, unlock and sleep, with this app closed too'
+
 
 class UnitSlider(SliderCard):
     '''Shows the value with its unit; the edit field gets the number alone, a unit there would
@@ -93,6 +95,11 @@ class GroupRow(CardBase):
 
 class NoticeRow(CardBase):
     '''A read-only row with its value or its reason at the right.'''
+
+    def set_value(self, value):
+        if value != self.value:
+            self.value = value
+            self.Refresh()
 
     def __init__(self, parent, theme, label, description, value, tone='warn'):
         super().__init__(parent, theme, label, description)
@@ -269,6 +276,10 @@ class MonitorSection:
         display = self.display
         self.scaled = {}
         rows = [GroupRow(board, theme, 'Graphics card · gamma')]
+        # Windows drops the gamma on sign-in, unlock and resume; say what brings it back,
+        # as nobody expects a task to appear for it
+        self.kept = NoticeRow(board, theme, 'Kept after a restart', KEPT_NOTE, '…', 'text')
+        rows.append(self.kept)
 
         for name, label, description, bounds in (
                 ('brightness', 'Brightness', 'Dims the signal; shadows crush below 100%',
@@ -388,6 +399,13 @@ class MonitorBox(ScrollArea):
         self.set_panels([section.panel for section in self.sections])
         self.bind_children()
         self.apply_theme(theme)
+
+    def set_kept(self, registered, needed):
+        # untouched gamma needs no task; a change without one is the case to notice
+        value = 'On' if registered else 'Off' if needed else 'Not needed'
+        for section in self.sections:
+            section.kept.tone = 'warn' if value == 'Off' else 'text'
+            section.kept.set_value(value)
 
     def on_reset(self):
         '''Called after every screen is already reset; only sets the cards again.'''

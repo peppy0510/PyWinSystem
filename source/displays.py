@@ -260,8 +260,10 @@ class DisplayManager():
                 if not display.is_software_neutral()}
 
     def apply_software(self):
+        # an untouched display is left as it is: opening the page changes no screen
         for display in self.displays:
-            display.apply_software()
+            if not display.is_software_neutral():
+                display.apply_software()
 
     def reset_software(self):
         for display in self.displays:
@@ -279,8 +281,13 @@ class DisplayManager():
 
 def apply_stored(handle, software):
     channels = (software['red'], software['green'], software['blue'])
-    return gamma.apply(handle, software['brightness'], software['contrast'],
-                       software['kelvin'], channels)
+    ramp = gamma.build_ramp(software['brightness'], software['contrast'], software['kelvin'],
+                            channels)
+    # the driver blinks the screen on every write, even of the ramp it already has
+    current = gamma.read_ramp(handle)
+    if current is not None and bytes(current) == bytes(ramp):
+        return True
+    return gamma.apply_ramp(handle, ramp)
 
 
 def restore_gamma(stored):

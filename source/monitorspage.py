@@ -78,13 +78,18 @@ class MonitorsPage(wx.Panel):
         self.manager = manager
         manager.load(self.stored)
         manager.apply_software()
+        # the box is built in many steps; frozen, the page shows the old one until it is done
+        # rather than an empty page and an unthemed corner
+        self.Freeze()
         self.box = MonitorBox(self, self.theme, manager.displays, self.folds, self.changed,
                               self.on_fold)
         self.sizer.Replace(self.waiting, self.box)
         self.waiting.Destroy()
         self.waiting = None
         self.Layout()
+        self.Thaw()
         self.capabilities = manager.store_capabilities()
+        self.check_kept()
 
     def changed(self):
         if self.saver is not None and self.saver.IsRunning():
@@ -97,8 +102,22 @@ class MonitorsPage(wx.Panel):
         self.stored = self.manager.store()
         self.capabilities = self.manager.store_capabilities() or self.capabilities
         self.on_change()
-        stored = dict(self.stored)
-        threading.Thread(target=monitortask.sync, args=(stored,), daemon=True).start()
+        self.sync(dict(self.stored))
+
+    def sync(self, stored):
+        def work():
+            monitortask.sync(stored)
+            call_painted(self, self.show_kept, monitortask.is_registered())
+        threading.Thread(target=work, daemon=True).start()
+
+    def check_kept(self):
+        def work():
+            call_painted(self, self.show_kept, monitortask.is_registered())
+        threading.Thread(target=work, daemon=True).start()
+
+    def show_kept(self, registered):
+        if self and self.box is not None:
+            self.box.set_kept(registered, bool(self.stored))
 
     def get_state(self):
         return {'monitors': self.stored, 'capabilities': self.capabilities}
@@ -115,7 +134,7 @@ class MonitorsPage(wx.Panel):
                 gamma.close_device(handle)
         self.stored = {}
         self.on_change()
-        threading.Thread(target=monitortask.sync, args=({},), daemon=True).start()
+        self.sync({})
 
     def apply_theme(self, theme):
         self.theme = theme
