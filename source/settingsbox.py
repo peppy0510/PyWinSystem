@@ -7,7 +7,9 @@ email: peppy0510@hotmail.com
 '''
 
 
+import makeshortcut
 import subprocess
+import sys
 
 import energy
 import wx
@@ -29,6 +31,8 @@ from utilities import get_asset_path
 THEMES = (('auto', 'Auto'), ('light', 'Light'), ('dark', 'Dark'))
 INTERVALS = ((1, '1 s'), (2, '2 s'), (5, '5 s'))
 PLANS = (('kr_home', 'KR home'), ('kr_flat', 'KR flat'), ('us', 'US'), ('jp', 'JP'))
+SHORTCUT_OFF = 'Put a shortcut in the Start menu'
+SHORTCUT_ON = 'A shortcut is in the Start menu'
 UPDATE_NOTE = 'Look for a new release on GitHub'
 TRAY_NOTE = 'Also from the tray icon while the window is hidden'
 TRAY_NOTE_OFF = 'Needs the tray icon, under Window'
@@ -68,6 +72,13 @@ class SettingsBox(ScrollArea):
                                          'Closing hides the window instead of quitting', on_change)
         self.autohide = SettingCard(board, theme, 'Auto hide menu', 'Show the header only on hover',
                                     on_change)
+        # a source run only: an installed exe has the installer's Start menu entry
+        self.shortcut = None
+        if not getattr(sys, 'frozen', False):
+            self.shortcut = ActionCard(board, theme, 'Start menu', SHORTCUT_OFF, 'Create',
+                                       self.on_shortcut)
+            self.shortcut.set_captions('Remove')
+            self.update_shortcut()
         self.theme_choice = ChoiceCard(board, theme, 'Theme', 'Auto follows Windows',
                                        THEMES, on_change)
         self.interval = ChoiceCard(board, theme, 'Refresh', 'How often the numbers update',
@@ -119,8 +130,9 @@ class SettingsBox(ScrollArea):
 
         self.set_panels([
             Panel(board, theme, 'settings.window', 'Window',
-                  (self.ontop, self.tray, self.close_to_tray, self.autohide), self.folds,
-                  self.on_fold),
+                  tuple(card for card in (self.ontop, self.tray, self.close_to_tray,
+                                          self.autohide, self.shortcut) if card),
+                  self.folds, self.on_fold),
             Panel(board, theme, 'settings.appearance', 'Appearance', (self.theme_choice,),
                   self.folds, self.on_fold),
             Panel(board, theme, 'settings.sampling', 'Sampling', (self.interval,), self.folds,
@@ -169,6 +181,26 @@ class SettingsBox(ScrollArea):
             subprocess.Popen(['notepad.exe', energy.TARIFF_PATH])
         except OSError as error:
             self.rates.set_description(f'Could not open {energy.TARIFF_PATH}: {error}')
+
+    def update_shortcut(self, note=None):
+        present = makeshortcut.has_start_menu()
+        self.shortcut.set_caption('Remove' if present else 'Create')
+        self.shortcut.set_description(note or (SHORTCUT_ON if present else SHORTCUT_OFF))
+
+    def on_shortcut(self):
+        try:
+            if makeshortcut.has_start_menu():
+                makeshortcut.remove_start_menu()
+                note = 'Shortcut removed'
+            else:
+                makeshortcut.create(makeshortcut.get_start_menu_paths()[0])
+                note = 'Shortcut created'
+        except Exception:
+            self.shortcut.set_description('Could not change the shortcut')
+            self.shortcut.set_tone('warn')
+            return
+        self.update_shortcut(note)
+        self.shortcut.set_tone('plain')
 
     def on_home(self):
         # explorer hands the link to the shell, so the browser does not inherit elevation
