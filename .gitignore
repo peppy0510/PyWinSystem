@@ -1,8 +1,15 @@
-__pycache__/
+*/__pycache__
+*/__test__
 *.pyc
+*.pyo
+*.log
 /.venv
 .dist
 .build
 source/.dist
 source/.build
 desktop.ini
+.sublime-workspace
+*.sublime-workspace
+*.sublime-project
+/CLAUDE.md
