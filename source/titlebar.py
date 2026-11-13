@@ -15,6 +15,7 @@ from utilities import APP_NAME
 from utilities import CAPTION_WIDTH
 from utilities import TITLEBAR_HEIGHT
 from utilities import Canvas
+from utilities import fill_rounded
 from utilities import get_asset_path
 from utilities import get_font
 from utilities import get_frame_margins
@@ -36,10 +37,12 @@ class TitleBar(Canvas):
 
     HEIGHT = TITLEBAR_HEIGHT
 
-    def __init__(self, parent, theme, on_menu, on_maximize):
+    # hand: a pointing hand over the buttons
+    def __init__(self, parent, theme, on_menu, on_maximize, hand=False):
         super().__init__(parent, theme)
         self.on_menu = on_menu
         self.on_maximize = on_maximize
+        self.hand = hand
         self.icon = self.load_icon()
         self.cap_height = None
         self.visible = True
@@ -151,6 +154,8 @@ class TitleBar(Canvas):
         name = self.hit_test(event.GetPosition())
         if name != self.hovered:
             self.hovered = name
+            if self.hand:
+                self.SetCursor(wx.Cursor(wx.CURSOR_HAND if name is not None else wx.CURSOR_ARROW))
             self.Refresh()
 
     def on_leave(self, event):
@@ -184,10 +189,7 @@ class TitleBar(Canvas):
             fill = self.get_fill(name)
             if fill:
                 box = self.get_box(rect)
-                gc.SetPen(wx.TRANSPARENT_PEN)
-                gc.SetBrush(wx.Brush(wx.Colour(fill)))
-                gc.DrawRoundedRectangle(box.x, box.y, box.width, box.height,
-                                        BUTTON_RADIUS)
+                fill_rounded(gc, fill, box.x, box.y, box.width, box.height, BUTTON_RADIUS)
 
             colour = theme['text']
             if name == 'close' and self.hovered == name:

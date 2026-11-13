@@ -11,6 +11,7 @@ import wx
 
 from icons import draw_glyph
 from utilities import Canvas
+from utilities import fill_rounded
 from utilities import get_font
 from utilities import mix
 
@@ -29,10 +30,12 @@ class SideMenu(Canvas):
     STEP = 12
     EASING = 0.34
 
-    def __init__(self, parent, theme, items, on_select):
+    # hand: a pointing hand over the items
+    def __init__(self, parent, theme, items, on_select, hand=False):
         super().__init__(parent, theme)
         self.items = items
         self.on_select = on_select
+        self.hand = hand
         self.selected = 0
         self.hovered = -1
         self.opened = False
@@ -145,6 +148,8 @@ class SideMenu(Canvas):
         index = self.hit_test(event.GetPosition())
         if index != self.hovered:
             self.hovered = index
+            if self.hand:
+                self.SetCursor(wx.Cursor(wx.CURSOR_HAND if index >= 0 else wx.CURSOR_ARROW))
             self.Refresh()
 
     def on_leave(self, event):
@@ -196,12 +201,11 @@ class SideMenu(Canvas):
             fill = None
 
         if fill:
-            gc.SetPen(wx.TRANSPARENT_PEN)
-            gc.SetBrush(wx.Brush(wx.Colour(fill)))
-            gc.DrawRoundedRectangle(rect.x, rect.y, rect.width, rect.height, self.RADIUS)
+            fill_rounded(gc, fill, rect.x, rect.y, rect.width, rect.height, self.RADIUS)
 
         if active:
             bar = rect.height * 0.40
+            gc.SetPen(wx.TRANSPARENT_PEN)
             gc.SetBrush(wx.Brush(wx.Colour(theme['accent'])))
             gc.DrawRoundedRectangle(rect.x + 2, rect.y + (rect.height - bar) / 2,
                                     3, bar, 1.5)
@@ -212,5 +216,7 @@ class SideMenu(Canvas):
 
         gc.SetFont(get_font(10, bold=active), wx.Colour(colour))
         text_height = gc.GetTextExtent(label)[1]
-        gc.DrawText(label, rect.x + self.LABEL_LEFT,
+        # a label from outside the app can run past the rim
+        limit = rect.width - self.LABEL_LEFT - 8
+        gc.DrawText(self.fit_text(gc, label, limit), rect.x + self.LABEL_LEFT,
                     rect.y + (rect.height - text_height) / 2)

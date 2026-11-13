@@ -20,6 +20,8 @@ from utilities import BUTTON_GAP
 from utilities import BUTTON_HEIGHT
 from utilities import BUTTON_PAD
 from utilities import CARD_HEIGHT
+from utilities import CHIP_FONT
+from utilities import CHIP_PAD
 from utilities import HEADER_BAND
 from utilities import PANEL_GAP
 from utilities import PANEL_MARGIN
@@ -32,6 +34,7 @@ from utilities import draw_chevron
 from utilities import draw_frame
 from utilities import draw_text_in
 from utilities import fill_rect
+from utilities import fill_rounded
 from utilities import get_font
 from utilities import get_ink
 from utilities import get_ink_span
@@ -176,8 +179,8 @@ class RoundButton(Pressable):
         gc.SetPen(wx.TRANSPARENT_PEN)
         gc.SetBrush(wx.Brush(self.get_fill(key)))
         if self.square:
-            gc.DrawRoundedRectangle(cx - radius, cy - radius,
-                                    radius * 2, radius * 2, self.CORNER)
+            fill_rounded(gc, self.get_fill(key), cx - radius, cy - radius,
+                         radius * 2, radius * 2, self.CORNER)
         else:
             gc.DrawEllipse(cx - radius, cy - radius, radius * 2, radius * 2)
 
@@ -298,7 +301,13 @@ def get_button_width(text):
     return get_text_width(get_font(BUTTON_FONT), text) + BUTTON_PAD * 2
 
 
-def draw_button(gc, theme, rect, text, state='plain', tone=None):
+def get_chip_width(text):
+    # from the ink, so both sides keep the same pad
+    ink_left, ink_right = get_ink_span(get_font(CHIP_FONT), text)
+    return ink_right - ink_left + 1 + CHIP_PAD * 2
+
+
+def draw_button(gc, theme, rect, text, state='plain', tone=None, chip=False):
     if state == 'lit':
         fill, edge, colour = theme['accent'], theme['accent'], theme['on_accent']
     else:
@@ -307,11 +316,18 @@ def draw_button(gc, theme, rect, text, state='plain', tone=None):
         edge, colour = theme['edge'], theme['text']
         if tone == 'warn':
             edge = colour = theme['warn']
-    gc.SetPen(get_pen(gc, edge))
-    gc.SetBrush(wx.Brush(wx.Colour(fill)))
-    gc.DrawRoundedRectangle(rect.x + 0.5, rect.y + 0.5, rect.width - 1, rect.height - 1,
-                            PANEL_RADIUS)
-    draw_text_in(gc, text, rect, get_font(BUTTON_FONT), colour, back=fill)
+    # the edge as a ring of its own, the fill 1px inside it
+    fill_rounded(gc, edge, rect.x, rect.y, rect.width, rect.height, PANEL_RADIUS)
+    fill_rounded(gc, fill, rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2,
+                 PANEL_RADIUS - 1)
+    if chip:
+        # the ink the width came from: one measured on the face colours can miss thin strokes
+        font = get_font(CHIP_FONT)
+        gc.SetFont(font, wx.Colour(colour))
+        gc.DrawText(text, rect.x + CHIP_PAD - get_ink_span(font, text)[0],
+                    get_text_top(font, rect.y, rect.height))
+    else:
+        draw_text_in(gc, text, rect, get_font(BUTTON_FONT), colour, back=fill)
 
 
 def draw_row_face(gc, theme, width, height, first, last):
@@ -359,20 +375,30 @@ class PanelHeader(Pressable):
     # subtitle cut short shows in full instead
     def update_tip(self, point=None):
         point = point or wx.GetMousePosition()
-        if self.clipped and self.clipped.Contains(self.ScreenToClient(point)):
+        position = self.ScreenToClient(point)
+        if self.holding:
+            hide_hover_tip(self)
+        elif self.clipped and self.clipped.Contains(position):
             lines = [(self.title, 'text')]
             if self.subtitle:
                 lines.append((self.subtitle, 'dim'))
             show_hover_tip(self, self.theme, lines, point)
-        elif self.hovered:
-            show_hover_tip(self, self.theme, [('Unfold' if self.folded else 'Fold', 'text')],
-                           point)
+        elif self.get_tip(position):
+            show_hover_tip(self, self.theme, [(self.get_tip(position), 'text')], point)
         else:
             hide_hover_tip(self)
+
+    # a header with more to press than its fold names only the fold
+    def get_tip(self, position):
+        return ('Unfold' if self.folded else 'Fold') if self.hits(position) else None
 
     def on_track(self, event):
         super().on_track(event)
         self.update_tip(self.ClientToScreen(event.GetPosition()))
+
+    def on_down(self, event):
+        hide_hover_tip(self)
+        super().on_down(event)
 
     def on_leave(self, event):
         super().on_leave(event)
@@ -779,19 +805,31 @@ class ChoiceCard(CardBase):
     marked = -1
     down_index = -1
     # below this much room for the label, the buttons wrap into a grid at the right,
-    # beside the label
+    # beside the label, or keep to one row and shrink to their captions
     LABEL_ROOM = 140
 
     def __init__(self, parent, theme, label, description, options, on_change=None,
-                 tips=None):
+                 tips=None, wraps=True):
         super().__init__(parent, theme, label, description, on_change)
         self.options = options
         self.value = options[0][0]
         # tips: {value: [(text, ink)]}, or a function of the value when the text can change
         # while the app runs
         self.tips = tips or {}
-        self.segment = max(get_button_width(name) for _, name in options)
+        self.wraps = wraps
+        self.widths = [get_button_width(name) for _, name in options]
+        self.segment = max(self.widths)
         self.Bind(wx.EVT_SIZE, self.on_size)
+
+    def set_options(self, options, value):
+        self.options = options
+        self.widths = [get_button_width(name) for _, name in options]
+        self.segment = max(self.widths)
+        self.value = value if value in [option[0] for option in options] else options[0][0]
+        self.marked = -1
+        self.SetMinSize(wx.Size(-1, self.get_needed_height(self.GetClientSize()[0])))
+        self.relayout()
+        self.Refresh()
 
     def update_label_tip(self, point=None):
         if 0 <= self.marked < len(self.options):
@@ -803,15 +841,23 @@ class ChoiceCard(CardBase):
         super().update_label_tip(point)
 
     def get_columns(self, width):
-        # None while every button fits beside the label in one row
+        # None while the buttons keep to one row beside the label
         count = len(self.options)
         room = width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP
-        if self.segment * count + BUTTON_GAP * (count - 1) <= room:
+        if not self.wraps or self.segment * count + BUTTON_GAP * (count - 1) <= room:
             return None
         widest = max(1, min(count, (room + BUTTON_GAP) // (self.segment + BUTTON_GAP)))
         # rows of even length: four buttons in three columns become two and two
         rows = -(-count // widest)
         return -(-count // rows)
+
+    def get_widths(self, width):
+        # of the one row: even, until a row that may not wrap runs short of room
+        count = len(self.options)
+        room = width - self.PADDING * 2 - self.LABEL_ROOM - self.LABEL_GAP
+        if self.wraps or self.segment * count + BUTTON_GAP * (count - 1) <= room:
+            return [self.segment] * count
+        return self.widths
 
     def get_rows(self, width):
         columns = self.get_columns(width)
@@ -860,9 +906,10 @@ class ChoiceCard(CardBase):
             return wx.Rect(left + (self.segment + BUTTON_GAP) * column,
                            top + (BUTTON_HEIGHT + BUTTON_GAP) * row,
                            self.segment, BUTTON_HEIGHT)
-        left = width - self.PADDING - self.segment * count - BUTTON_GAP * (count - 1)
-        return wx.Rect(left + (self.segment + BUTTON_GAP) * index, (height - BUTTON_HEIGHT) // 2,
-                       self.segment, BUTTON_HEIGHT)
+        widths = self.get_widths(width)
+        left = width - self.PADDING - sum(widths) - BUTTON_GAP * (count - 1)
+        return wx.Rect(left + sum(widths[:index]) + BUTTON_GAP * index,
+                       (height - BUTTON_HEIGHT) // 2, widths[index], BUTTON_HEIGHT)
 
     def get_index(self, position):
         width, height = self.GetClientSize()
@@ -914,7 +961,6 @@ class ChoiceCard(CardBase):
             # the label ends where the widest row begins
             return width - self.PADDING - self.segment * columns - BUTTON_GAP * (columns - 1)
         return self.get_cell(0, width, height).x
-
 
 
 NUMBER = re.compile(r'[-+]?\d+(?:\.\d+)?')
